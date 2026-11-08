@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+source "$HERE/ps4-env.sh"
+ROOT="$PS4_BUILD_ROOT"
+SYSROOT="${PS4_SYSROOT:-$ROOT/sysroot}"
+MESA="$ROOT/src/mesa"
+build="$ROOT/build/mesa"
+export PATH="$ROOT/mesa-venv/bin:$ROOT/host-tools/bin:$PATH"
+
+pc="$ROOT/mesa-pkgconfig"
+mkdir -p "$pc"
+rm -f "$pc/libdrm.pc"
+for name in libdrm_amdgpu; do
+    cat > "$pc/$name.pc" <<EOF
+Name: $name
+Description: libdrm headers only (PS4 has no DRM)
+Version: 2.4.125
+Cflags: -I$ROOT/src/libdrm -I$ROOT/src/libdrm/include/drm -I$ROOT/src/libdrm/amdgpu
+Libs:
+EOF
+done
+
+flags="'-target', 'x86_64-pc-freebsd12-elf', '-D_GNU_SOURCE', '-D__PS4__', '-D__OPENORBIS__',
+  '-D__ORBIS__', '-DPS4', '-D__BSD_VISIBLE', '-D_BSD_SOURCE', '-fPIC', '-funwind-tables',
+  '-march=btver2', '-isysroot', '$OPENORBIS', '-isystem', '$SYSROOT/libc-overlay',
+  '-isystem', '$HERE/../port/mesa-overlay', '-I$ROOT/src/libdrm', '-I$ROOT/src/libdrm/include/drm',
+  '-isystem', '$OPENORBIS/include', '-I$OPENORBIS/usr/include'"
+link="'-fuse-ld=$OPENORBIS/bin/ld.lld', '-nostdlib', '-Wl,-m,elf_x86_64', '-Wl,-pie',
+  '-Wl,--eh-frame-hdr', '-Wl,--script,$OPENORBIS/link.x', '-L$OPENORBIS/lib',
+  '$OPENORBIS/lib/crt1.o', '-lkernel', '-lc', '-lclang_rt.builtins-x86_64', '-lSceLibcInternal'"
+cross="$ROOT/mesa-ps4-cross.ini"
+cat > "$cross" <<EOF
+[binaries]
+c = 'clang-21'
+cpp = 'clang++-21'
+ar = 'llvm-ar-21'
+strip = 'llvm-strip-21'
+pkg-config = 'pkg-config'
+
+[properties]
+needs_exe_wrapper = true
+pkg_config_libdir = '$pc'
+
+[built-in options]
+c_args = [$flags]
+cpp_args = ['-nostdinc++', '-isystem', '$SYSROOT/include/c++/v1', $flags]
+c_link_args = [$link]
+cpp_link_args = [$link, '$SYSROOT/lib/libc++.a', '$SYSROOT/lib/libc++abi.a',
+  '$OPENORBIS/lib/libunwind.a']
+
+[host_machine]
+system = 'freebsd'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
+EOF
+
+tr -d '\015' < "$HERE/../port/mesa/ac_ps4_drm.c" > "$MESA/src/amd/common/ac_ps4_drm.c"
+
+if [ "${1:-}" = setup ] || [ ! -f "$build/build.ninja" ]; then
+    rm -rf "$build"
+    PKG_CONFIG_LIBDIR="$pc" meson setup "$build" "$MESA" --cross-file "$cross" \
+        -Dbuildtype=release -Db_ndebug=true -Ddefault_library=static \
+        -Dvulkan-drivers=amd -Dgallium-drivers= -Dplatforms= -Dllvm=disabled \
+        -Damd-use-llvm=false -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Dglx=disabled \
+        -Degl=disabled -Dgbm=disabled -Dzstd=disabled -Dexpat=disabled -Dxmlconfig=disabled \
+        -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled -Dbuild-tests=false \
+        -Dshader-cache=disabled -Dvulkan-layers= -Dtools= -Dvideo-codecs= -Dspirv-tools=disabled \
+        -Dperfetto=false -Dselinux=false
+fi
+libs=(src/amd/vulkan/libvulkan_radeon.a src/amd/addrlib/libaddrlib.a
+    src/amd/common/libamd_common.a src/amd/compiler/libaco.a src/c11/impl/libmesa_util_c11.a
+    src/compiler/libcompiler.a src/compiler/nir/libnir.a src/compiler/spirv/libvtn.a
+    src/util/blake3/libblake3.a src/util/libmesa_util.a src/util/libmesa_util_clflush.a
+    src/util/libmesa_util_clflushopt.a src/util/libmesa_util_simd.a src/util/libparson.a
+    src/util/libxmlconfig.a src/vulkan/runtime/libvulkan_instance.a
+    src/vulkan/runtime/libvulkan_runtime.a src/vulkan/util/libvulkan_util.a
+    src/vulkan/wsi/libvulkan_wsi.a)
+build_id="$(git -C "$MESA" rev-parse HEAD 2>/dev/null || echo mesa-26.0.8-dk64ps4 | sha1sum | cut -d" " -f1)"
+meson configure "$build" -Dradv-build-id="$build_id" >/dev/null
+ninja -C "$build" "${@:2}" "${libs[@]}"

@@ -1,0 +1,58 @@
+name: Build PS4 package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Get the source
+        uses: actions/checkout@v4
+
+      - name: Make room on the disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
+      - name: Restore the PS4 toolchain from earlier runs
+        uses: actions/cache@v4
+        with:
+          path: ~/dk64-build
+          key: ps4-toolchain-${{ hashFiles('toolchain/**', 'port/**', 'patches/mesa-ps4.patch', 'scripts/build-mesa.sh', 'scripts/build-deps.sh', 'cmake/ps4-deps.cmake') }}
+
+      - name: Build DuckStation for PS4
+        env:
+          PKG_OUT: ${{ github.workspace }}/out
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then export DS_VERSION="${GITHUB_REF_NAME#v}"; fi
+          ./setup-everything.sh
+
+      - name: Keep the build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: ~/dk64-build/logs/
+          if-no-files-found: ignore
+
+      - name: Keep the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: DuckStation-PS4-pkg
+          path: out/*.pkg
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.pkg
+          generate_release_notes: true

@@ -1,0 +1,2350 @@
+diff --git a/CMakeModules/DuckStationBuildOptions.cmake b/CMakeModules/DuckStationBuildOptions.cmake
+index 0d3d6d41..c417ca5e 100644
+--- a/CMakeModules/DuckStationBuildOptions.cmake
++++ b/CMakeModules/DuckStationBuildOptions.cmake
+@@ -6,7 +6,7 @@ option(BUILD_QT_FRONTEND "Build the Qt frontend" ON)
+ option(BUILD_REGTEST "Build regression test runner" OFF)
+ option(BUILD_TESTS "Build unit tests" OFF)
+ 
+-if(LINUX OR BSD)
++if((LINUX OR BSD) AND NOT PS4)
+   option(ENABLE_X11 "Support X11 window system" ON)
+   option(ENABLE_WAYLAND "Support Wayland window system" ON)
+ endif()
+diff --git a/CMakeModules/DuckStationDependencies.cmake b/CMakeModules/DuckStationDependencies.cmake
+index 66e06a28..8fe2e137 100644
+--- a/CMakeModules/DuckStationDependencies.cmake
++++ b/CMakeModules/DuckStationDependencies.cmake
+@@ -1,3 +1,8 @@
++if(PS4)
++  include("${PS4_DEPS_FILE}")
++  return()
++endif()
++
+ # From PCSX2: On macOS, Mono.framework contains an ancient version of libpng. We don't want that.
+ # Avoid it by telling cmake to avoid finding frameworks while we search for libpng.
+ if(APPLE)
+diff --git a/CMakeModules/DuckStationUtils.cmake b/CMakeModules/DuckStationUtils.cmake
+index 34fb2395..aadce759 100644
+--- a/CMakeModules/DuckStationUtils.cmake
++++ b/CMakeModules/DuckStationUtils.cmake
+@@ -23,6 +23,8 @@ function(detect_operating_system)
+ 		message(STATUS "Building for MacOS.")
+ 	elseif(LINUX)
+ 		message(STATUS "Building for Linux.")
++	elseif(PS4)
++		message(STATUS "Building for PS4.")
+ 	elseif(BSD)
+ 		message(STATUS "Building for *BSD.")
+   elseif(NINTENDO_SWITCH)
+diff --git a/dep/CMakeLists.txt b/dep/CMakeLists.txt
+index 85d1cd0e..42bb3d7d 100644
+--- a/dep/CMakeLists.txt
++++ b/dep/CMakeLists.txt
+@@ -19,9 +19,11 @@ if (NOT NINTENDO_SWITCH)
+ endif()
+ add_subdirectory(soundtouch EXCLUDE_FROM_ALL)
+ disable_compiler_warnings_for_target(soundtouch)
+-add_subdirectory(googletest EXCLUDE_FROM_ALL)
+-add_subdirectory(cpuinfo EXCLUDE_FROM_ALL)
+-disable_compiler_warnings_for_target(cpuinfo)
++if(NOT PS4)
++  add_subdirectory(googletest EXCLUDE_FROM_ALL)
++  add_subdirectory(cpuinfo EXCLUDE_FROM_ALL)
++  disable_compiler_warnings_for_target(cpuinfo)
++endif()
+ add_subdirectory(fast_float EXCLUDE_FROM_ALL)
+ add_subdirectory(reshadefx EXCLUDE_FROM_ALL)
+ disable_compiler_warnings_for_target(reshadefx)
+@@ -29,11 +31,13 @@ add_subdirectory(rcheevos EXCLUDE_FROM_ALL)
+ disable_compiler_warnings_for_target(rcheevos)
+ add_subdirectory(rapidyaml EXCLUDE_FROM_ALL)
+ disable_compiler_warnings_for_target(rapidyaml)
+-add_subdirectory(cubeb EXCLUDE_FROM_ALL)
+-disable_compiler_warnings_for_target(cubeb)
+-disable_compiler_warnings_for_target(speex)
+-add_subdirectory(discord-rpc EXCLUDE_FROM_ALL)
+-disable_compiler_warnings_for_target(discord-rpc)
++if(NOT PS4)
++  add_subdirectory(cubeb EXCLUDE_FROM_ALL)
++  disable_compiler_warnings_for_target(cubeb)
++  disable_compiler_warnings_for_target(speex)
++  add_subdirectory(discord-rpc EXCLUDE_FROM_ALL)
++  disable_compiler_warnings_for_target(discord-rpc)
++endif()
+ 
+ if(ENABLE_OPENGL)
+   add_subdirectory(glad EXCLUDE_FROM_ALL)
+diff --git a/dep/fmt/include/fmt/os.h b/dep/fmt/include/fmt/os.h
+index 2126424d..47405678 100644
+--- a/dep/fmt/include/fmt/os.h
++++ b/dep/fmt/include/fmt/os.h
+@@ -13,7 +13,7 @@
+ #include <cstdio>
+ #include <system_error>  // std::system_error
+ 
+-#if defined __APPLE__ || defined(__FreeBSD__)
++#if defined __APPLE__ || (defined(__FreeBSD__) && !defined(__PS4__))
+ #  include <xlocale.h>  // for LC_NUMERIC_MASK on OS X
+ #endif
+ 
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 879d46bc..bd519462 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -3,7 +3,7 @@ add_subdirectory(util)
+ add_subdirectory(core)
+ add_subdirectory(scmversion)
+ 
+-if(WIN32 OR APPLE)
++if((WIN32 OR APPLE) AND NOT PS4)
+   add_subdirectory(updater)
+ endif()
+ 
+diff --git a/src/common/CMakeLists.txt b/src/common/CMakeLists.txt
+index 55fdf120..8cc5ba67 100644
+--- a/src/common/CMakeLists.txt
++++ b/src/common/CMakeLists.txt
+@@ -66,7 +66,7 @@ target_include_directories(common PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+ target_include_directories(common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+ 
+ target_link_libraries(common PUBLIC fmt Threads::Threads fast_float)
+-if (NOT NINTENDO_SWITCH)
++if (NOT NINTENDO_SWITCH AND NOT PS4)
+   target_link_libraries(common PRIVATE "${CMAKE_DL_LIBS}")
+ endif()
+ 
+diff --git a/src/common/byte_stream.cpp b/src/common/byte_stream.cpp
+index 11b4d046..2c8687c3 100644
+--- a/src/common/byte_stream.cpp
++++ b/src/common/byte_stream.cpp
+@@ -26,6 +26,7 @@
+ #ifdef __SWITCH__
+ #include <fcntl.h>
+ #endif
++#include <unistd.h>
+ #endif
+ 
+ 
+@@ -1153,7 +1154,7 @@ std::unique_ptr<ByteStream> ByteStream::OpenFile(const char* fileName, u32 openM
+     std::snprintf(temporaryFileName, fileNameLength + 8, "%s.XXXXXX", fileName);
+ 
+     // fill in random characters
+-#if defined(__linux__) || defined(__ANDROID__) || defined(__APPLE__) || defined(__SWITCH__)
++#if defined(__linux__) || defined(__ANDROID__) || defined(__APPLE__) || defined(__SWITCH__) || defined(__FreeBSD__)
+     close(mkstemp(temporaryFileName));
+ #else
+     close(mktemp(temporaryFileName));
+diff --git a/src/common/file_system.cpp b/src/common/file_system.cpp
+index 08aa4688..ce91f2a9 100644
+--- a/src/common/file_system.cpp
++++ b/src/common/file_system.cpp
+@@ -2378,6 +2378,8 @@ std::string FileSystem::GetProgramPath()
+     buffer = static_cast<char*>(std::realloc(buffer, curSize + 1));
+   }
+ 
++#elif defined(__PS4__)
++  return "/app0/eboot.bin";
+ #elif defined(__FreeBSD__)
+   int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1};
+   char buffer[PATH_MAX];
+@@ -2421,8 +2423,8 @@ bool FileSystem::SetPathCompression(const char* path, bool enable)
+   return false;
+ }
+ 
+-#ifndef __SWITCH__
+-static bool SetLockLock(int fd, bool lock)
++#if !defined(__SWITCH__) && !defined(__PS4__)
++static bool SetLock(int fd, bool lock)
+ {
+   // We want to lock the whole file.
+   const off_t offs = lseek(fd, 0, SEEK_CUR);
+diff --git a/src/common/file_system.h b/src/common/file_system.h
+index 41f213b9..63aa161f 100644
+--- a/src/common/file_system.h
++++ b/src/common/file_system.h
+@@ -127,7 +127,7 @@ ManagedCFilePtr OpenManagedSharedCFile(const char* filename, const char* mode, F
+ std::FILE* OpenSharedCFile(const char* filename, const char* mode, FileShareMode share_mode, Error* error = nullptr);
+ 
+ /// Abstracts a POSIX file lock.
+-#if !defined(_WIN32) && !defined(__SWITCH__)
++#if !defined(_WIN32) && !defined(__SWITCH__) && !defined(__PS4__)
+ class POSIXLock
+ {
+ public:
+diff --git a/src/common/heap_array.h b/src/common/heap_array.h
+index dceeb44b..ba3ea09c 100644
+--- a/src/common/heap_array.h
++++ b/src/common/heap_array.h
+@@ -353,7 +353,7 @@ private:
+       if (!m_data)
+         Panic("Memory allocation failed.");
+ #else
+-#ifdef __SWITCH__
++#if defined(__SWITCH__) || defined(__PS4__)
+       m_data = reinterpret_cast<T*>(aligned_alloc(alignment, size * sizeof(T)));
+       if (!m_data)
+ #else
+diff --git a/src/common/memmap.cpp b/src/common/memmap.cpp
+index 685d955c..4e3c9fd0 100644
+--- a/src/common/memmap.cpp
++++ b/src/common/memmap.cpp
+@@ -15,6 +15,10 @@
+ #include "windows_headers.h"
+ #elif defined(__SWITCH__)
+ #include <switch.h>
++#elif defined(__PS4__)
++#include "ps4_host.h"
++#include <cerrno>
++#include <sys/mman.h>
+ #elif !defined(__ANDROID__)
+ #include <cerrno>
+ #include <fcntl.h>
+@@ -613,6 +617,108 @@ ALWAYS_INLINE static void EndCodeWrite()
+ {
+ }
+ 
++#elif defined(__PS4__)
++
++bool MemMap::MemProtect(void* baseaddr, size_t size, PageProtect mode)
++{
++  DebugAssertMsg((size & (HOST_PAGE_SIZE - 1)) == 0, "Size is page aligned");
++
++  if (ps4_host_protect(baseaddr, size, static_cast<int>(mode)) != 0)
++  {
++    Log_ErrorPrintf("mprotect() for %zu at %p failed", size, baseaddr);
++    return false;
++  }
++
++  return true;
++}
++
++std::string MemMap::GetFileMappingName(const char* prefix)
++{
++  return prefix;
++}
++
++void* MemMap::CreateSharedMemory(const char* name, size_t size, Error* error)
++{
++  void* handle = ps4_host_shm_create(size);
++  if (!handle)
++    Error::SetStringFmt(error, "Failed to allocate {} bytes of direct memory", size);
++  return handle;
++}
++
++void MemMap::DestroySharedMemory(void* ptr)
++{
++  ps4_host_shm_destroy(ptr);
++}
++
++void* MemMap::MapSharedMemory(void* handle, size_t offset, void* baseaddr, size_t size, PageProtect mode)
++{
++  return ps4_host_shm_map(handle, offset, baseaddr, size, static_cast<int>(mode));
++}
++
++void MemMap::UnmapSharedMemory(void* baseaddr, size_t size)
++{
++  if (ps4_host_shm_unmap(baseaddr, size) != 0)
++    Panic("Failed to unmap shared memory");
++}
++
++SharedMemoryMappingArea::SharedMemoryMappingArea() = default;
++
++SharedMemoryMappingArea::~SharedMemoryMappingArea()
++{
++  Destroy();
++}
++
++bool SharedMemoryMappingArea::Create(size_t size)
++{
++  AssertMsg(Common::IsAlignedPow2(size, HOST_PAGE_SIZE), "Size is page aligned");
++  Destroy();
++
++  void* alloc = ps4_host_reserve(size);
++  if (!alloc)
++    return false;
++
++  m_base_ptr = static_cast<u8*>(alloc);
++  m_size = size;
++  m_num_pages = size / HOST_PAGE_SIZE;
++  return true;
++}
++
++void SharedMemoryMappingArea::Destroy()
++{
++  AssertMsg(m_num_mappings == 0, "No mappings left");
++
++  if (m_base_ptr)
++    ps4_host_release(m_base_ptr, m_size);
++
++  m_base_ptr = nullptr;
++  m_size = 0;
++  m_num_pages = 0;
++}
++
++u8* SharedMemoryMappingArea::Map(void* file_handle, size_t file_offset, void* map_base, size_t map_size,
++                                 PageProtect mode)
++{
++  DebugAssert(static_cast<u8*>(map_base) >= m_base_ptr && static_cast<u8*>(map_base) < (m_base_ptr + m_size));
++
++  void* const ptr = ps4_host_shm_map(file_handle, file_offset, map_base, map_size, static_cast<int>(mode));
++  if (!ptr)
++    return nullptr;
++
++  m_num_mappings++;
++  return static_cast<u8*>(ptr);
++}
++
++bool SharedMemoryMappingArea::Unmap(void* map_base, size_t map_size)
++{
++  DebugAssert(static_cast<u8*>(map_base) >= m_base_ptr && static_cast<u8*>(map_base) < (m_base_ptr + m_size));
++
++  if (ps4_host_rereserve(map_base, map_size) != 0)
++    return false;
++
++  m_num_mappings--;
++  return true;
++}
++
+ #elif !defined(__ANDROID__)
+ 
+ bool MemMap::MemProtect(void* baseaddr, size_t size, PageProtect mode)
+diff --git a/src/common/ps4_host.h b/src/common/ps4_host.h
+new file mode 100644
+index 00000000..19b84fa5
+--- /dev/null
++++ b/src/common/ps4_host.h
+@@ -0,0 +1,33 @@
++#pragma once
++
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int ps4_host_protect(void* addr, size_t size, int prot);
++void* ps4_host_shm_create(size_t size);
++void ps4_host_shm_destroy(void* handle);
++void* ps4_host_shm_map(void* handle, size_t offset, void* addr, size_t size, int prot);
++int ps4_host_shm_unmap(void* addr, size_t size);
++void* ps4_host_reserve(size_t size);
++void ps4_host_release(void* addr, size_t size);
++int ps4_host_rereserve(void* addr, size_t size);
++
++void* ps4_host_jit_alloc(size_t size);
++void ps4_host_jit_free(void* addr, size_t size);
++int ps4_host_jit_available(void);
++void ps4_host_set_jit_unavailable(void);
++
++const char* ps4_host_data_dir(void);
++const char* ps4_host_app_dir(void);
++void ps4_host_notify(const char* text);
++void ps4_host_exit(int code);
++void ps4_host_thread_named(const char* name);
++void ps4_host_frame(void);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/src/common/threading.cpp b/src/common/threading.cpp
+index fec3aa8e..5424ab37 100644
+--- a/src/common/threading.cpp
++++ b/src/common/threading.cpp
+@@ -3,6 +3,9 @@
+ 
+ #include "threading.h"
+ #include "assert.h"
++#ifdef __PS4__
++#include "ps4_host.h"
++#endif
+ #include <memory>
+ 
+ #if !defined(_WIN32) && !defined(__APPLE__)
+@@ -74,9 +77,13 @@ static u64 get_thread_time(void* id = 0)
+   clockid_t cid;
+   if (id)
+   {
++#ifdef __PS4__
++    return 0;
++#else
+     int err = pthread_getcpuclockid((pthread_t)id, &cid);
+     if (err)
+       return 0;
++#endif
+   }
+   else
+   {
+@@ -477,7 +484,11 @@ u64 Threading::GetThreadCpuTime()
+   return getthreadtime(pthread_mach_thread_np(pthread_self()));
+ #elif defined(__SWITCH__)
+   return armGetSystemTick();
+-#elif
++#elif defined(__PS4__)
++  struct timespec ts;
++  clock_gettime(CLOCK_MONOTONIC, &ts);
++  return static_cast<u64>(ts.tv_sec) * 1000000 + static_cast<u64>(ts.tv_nsec) / 1000;
++#else
+   return get_thread_time(nullptr);
+ #endif
+ }
+@@ -561,6 +572,8 @@ void Threading::SetNameOfCurrentThread(const char* name)
+   prctl(PR_SET_NAME, name, 0, 0, 0);
+ #elif defined(__APPLE__)
+   pthread_setname_np(name);
++#elif defined(__PS4__)
++  ps4_host_thread_named(name);
+ #elif !defined(__SWITCH__)
+   pthread_set_name_np(pthread_self(), name);
+ #endif
+diff --git a/src/common/timer.cpp b/src/common/timer.cpp
+index 6d08f790..9080ef00 100644
+--- a/src/common/timer.cpp
++++ b/src/common/timer.cpp
+@@ -208,7 +208,7 @@ void Timer::SleepUntil(Value value, bool exact)
+   else
+   {
+     // Apple doesn't have TIMER_ABSTIME, so fall back to nanosleep in such a case.
+-#if defined(__APPLE__) || defined(__SWITCH__)
++#if defined(__APPLE__) || defined(__SWITCH__) || defined(__PS4__)
+     for (;;)
+     {
+       const Value current_time = GetCurrentValue();
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 5c2edd60..a009cf15 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -136,7 +136,10 @@ target_link_libraries(core PUBLIC Threads::Threads common util ZLIB::ZLIB)
+ target_link_libraries(core PRIVATE xxhash imgui rapidyaml rcheevos)
+ 
+ if(CPU_ARCH_X64)
+-  target_compile_definitions(core PUBLIC "ENABLE_RECOMPILER=1" "ENABLE_NEWREC=1" "ENABLE_MMAP_FASTMEM=1")
++  target_compile_definitions(core PUBLIC "ENABLE_RECOMPILER=1" "ENABLE_NEWREC=1")
++  if(NOT PS4)
++    target_compile_definitions(core PUBLIC "ENABLE_MMAP_FASTMEM=1")
++  endif()
+   target_sources(core PRIVATE ${RECOMPILER_SRCS} ${NEWREC_SOURCES}
+     cpu_recompiler_code_generator_x64.cpp
+     cpu_newrec_compiler_x64.cpp
+@@ -178,7 +181,7 @@ if(CPU_ARCH_RISCV64)
+   message(STATUS "Building RISC-V 64-bit recompiler.")
+ endif()
+ 
+-if(NOT ANDROID AND NOT NINTENDO_SWITCH)
++if(NOT ANDROID AND NOT NINTENDO_SWITCH AND NOT PS4)
+   target_compile_definitions(core PUBLIC -DENABLE_DISCORD_PRESENCE=1)
+   target_link_libraries(core PRIVATE discord-rpc)
+ endif()
+@@ -190,6 +193,10 @@ function(add_resources target path basedir)
+ 	if(APPLE)
+ 		target_sources(${target} PRIVATE ${path})
+ 		set_source_files_properties(${path} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/${subdir})
++  elseif(PS4)
++    add_custom_command(TARGET ${target} POST_BUILD
++      COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/pkgroot/resources/${subdir}"
++      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${path}" "${CMAKE_BINARY_DIR}/pkgroot/resources/${subdir}")
+   elseif(NINTENDO_SWITCH)
+     add_custom_command(TARGET ${target} POST_BUILD
+       COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/romfs/resources/${subdir}"
+diff --git a/src/core/cpu_code_cache.cpp b/src/core/cpu_code_cache.cpp
+index 83e8d896..869ca6c8 100644
+--- a/src/core/cpu_code_cache.cpp
++++ b/src/core/cpu_code_cache.cpp
+@@ -17,6 +17,9 @@
+ #include "common/intrin.h"
+ #include "common/log.h"
+ #include "common/memmap.h"
++#ifdef __PS4__
++#include "common/ps4_host.h"
++#endif
+ 
+ Log_SetChannel(CPU::CodeCache);
+ 
+@@ -123,7 +126,7 @@ PerfScope MIPSPerfScope("MIPS");
+ #endif
+ 
+ // Currently remapping the code buffer doesn't work in macOS. TODO: Make dynamic instead...
+-#ifndef __APPLE__
++#if !defined(__APPLE__) && !defined(__PS4__)
+ #define USE_STATIC_CODE_BUFFER 1
+ #endif
+ 
+@@ -176,11 +179,16 @@ bool CPU::CodeCache::ProcessStartup()
+ #else
+   const bool has_buffer = false;
+ #endif
++#ifdef __PS4__
++  if (!has_buffer && !s_code_buffer.Allocate(RECOMPILER_CODE_CACHE_SIZE, RECOMPILER_FAR_CODE_CACHE_SIZE))
++    ps4_host_set_jit_unavailable();
++#else
+   if (!has_buffer && !s_code_buffer.Allocate(RECOMPILER_CODE_CACHE_SIZE, RECOMPILER_FAR_CODE_CACHE_SIZE))
+   {
+     Host::ReportFatalError("Error", "Failed to initialize code space");
+     return false;
+   }
++#endif
+ #endif
+ 
+   if (!Common::PageFaultHandler::InstallHandler(ExceptionHandler))
+diff --git a/src/core/cpu_newrec_compiler_x64.cpp b/src/core/cpu_newrec_compiler_x64.cpp
+index 0b59bac4..235c82fc 100644
+--- a/src/core/cpu_newrec_compiler_x64.cpp
++++ b/src/core/cpu_newrec_compiler_x64.cpp
+@@ -54,9 +54,9 @@ CPU::NewRec::X64Compiler::X64Compiler() = default;
+ CPU::NewRec::X64Compiler::~X64Compiler() = default;
+ 
+ void CPU::NewRec::X64Compiler::Reset(CodeCache::Block* block, u8* code_buffer, u32 code_buffer_space,
+-                                     u8* far_code_buffer, u32 far_code_space)
++                                     u8* far_code_buffer, u32 far_code_space, ptrdiff_t rw_diff)
+ {
+-  Compiler::Reset(block, code_buffer, code_buffer_space, far_code_buffer, far_code_space);
++  Compiler::Reset(block, code_buffer, code_buffer_space, far_code_buffer, far_code_space, rw_diff);
+ 
+   // TODO: don't recreate this every time..
+   DebugAssert(!m_emitter && !m_far_emitter && !cg);
+@@ -2135,7 +2135,7 @@ void CPU::NewRec::X64Compiler::Compile_cop2(CompileFlags cf)
+ }
+ 
+ u32 CPU::NewRec::CompileLoadStoreThunk(void* thunk_code, u32 thunk_space, void* code_address, u32 code_size,
+-                                       TickCount cycles_to_add, TickCount cycles_to_remove, u32 gpr_bitmask,
++                                       ptrdiff_t rw_diff, TickCount cycles_to_add, TickCount cycles_to_remove, u32 gpr_bitmask,
+                                        u8 address_register, u8 data_register, MemoryAccessSize size, bool is_signed,
+                                        bool is_load)
+ {
+diff --git a/src/core/cpu_newrec_compiler_x64.h b/src/core/cpu_newrec_compiler_x64.h
+index 10205406..a63819b4 100644
+--- a/src/core/cpu_newrec_compiler_x64.h
++++ b/src/core/cpu_newrec_compiler_x64.h
+@@ -27,7 +27,7 @@ protected:
+   void CopyHostReg(u32 dst, u32 src) override;
+ 
+   void Reset(CodeCache::Block* block, u8* code_buffer, u32 code_buffer_space, u8* far_code_buffer,
+-             u32 far_code_space) override;
++             u32 far_code_space, ptrdiff_t rw_diff) override;
+   void BeginBlock() override;
+   void GenerateBlockProtectCheck(const u8* ram_ptr, const u8* shadow_ptr, u32 size) override;
+   void GenerateICacheCheckAndUpdate() override;
+diff --git a/src/core/cpu_recompiler_code_generator_x64.cpp b/src/core/cpu_recompiler_code_generator_x64.cpp
+index 4c495589..c80fda09 100644
+--- a/src/core/cpu_recompiler_code_generator_x64.cpp
++++ b/src/core/cpu_recompiler_code_generator_x64.cpp
+@@ -34,7 +34,7 @@ bool CPU::Recompiler::IsCallerSavedRegister(u32 id)
+ #endif
+ }
+ 
+-u32 CPU::CodeCache::EmitASMFunctions(void* code, u32 code_size)
++u32 CPU::CodeCache::EmitASMFunctions(void* code, u32 code_size, ptrdiff_t rw_diff)
+ {
+   using namespace Xbyak;
+ 
+@@ -127,7 +127,7 @@ u32 CPU::CodeCache::EmitASMFunctions(void* code, u32 code_size)
+   return static_cast<u32>(cg->getSize());
+ }
+ 
+-u32 CPU::CodeCache::EmitJump(void* code, const void* dst, bool flush_icache)
++u32 CPU::CodeCache::EmitJump(void* code, const void* dst, ptrdiff_t rw_diff, bool flush_icache)
+ {
+   u8* ptr = static_cast<u8*>(code);
+   *(ptr++) = 0xE9; // jmp
+diff --git a/src/core/fullscreen_ui.cpp b/src/core/fullscreen_ui.cpp
+index fb8db1fa..d30c50c9 100644
+--- a/src/core/fullscreen_ui.cpp
++++ b/src/core/fullscreen_ui.cpp
+@@ -1500,7 +1500,7 @@ void FullscreenUI::DrawExitWindow()
+ 
+   ImGui::PushStyleColor(ImGuiCol_Text, UIBackgroundTextColor);
+ 
+-#ifdef __SWITCH__
++#if defined(__SWITCH__) || defined(__PS4__)
+   constexpr int NumMenuItems = 2;
+ #else
+   constexpr int NumMenuItems = 3;
+@@ -1525,7 +1525,7 @@ void FullscreenUI::DrawExitWindow()
+       DoRequestExit();
+     }
+ 
+-#ifndef __SWITCH__
++#if !defined(__SWITCH__) && !defined(__PS4__)
+     if (HorizontalMenuItem(GetCachedTexture("fullscreenui/desktop-mode.png"), FSUI_CSTR("Desktop Mode"),
+                            FSUI_CSTR("Exits Big Picture mode, returning to the desktop interface.")))
+     {
+diff --git a/src/core/game_database.cpp b/src/core/game_database.cpp
+index a36b1a4f..bcff5f3b 100644
+--- a/src/core/game_database.cpp
++++ b/src/core/game_database.cpp
+@@ -958,7 +958,7 @@ bool GameDatabase::ParseYamlEntry(Entry* entry, const ryml::ConstNodeRef& value)
+           parsed_time.tm_isdst = 0;
+ #ifdef _WIN32
+           entry->release_date = _mkgmtime(&parsed_time);
+-#elif defined(__SWITCH__)
++#elif defined(__SWITCH__) || defined(__PS4__)
+         entry->release_date = mktime(&parsed_time);
+ #else
+           entry->release_date = timegm(&parsed_time);
+diff --git a/src/core/game_list.cpp b/src/core/game_list.cpp
+index f2a55cbd..77de2cd5 100644
+--- a/src/core/game_list.cpp
++++ b/src/core/game_list.cpp
+@@ -849,7 +849,7 @@ GameList::PlayedTimeMap GameList::LoadPlayedTimeMap(const std::string& path)
+ 
+   if (fp)
+   {
+-#if !defined(_WIN32) && !defined(__SWITCH__)
++#if !defined(_WIN32) && !defined(__SWITCH__) && !defined(__PS4__)
+     FileSystem::POSIXLock flock(fp.get());
+ #endif
+ 
+@@ -900,7 +900,7 @@ GameList::PlayedTimeEntry GameList::UpdatePlayedTimeFile(const std::string& path
+     return new_entry;
+   }
+ 
+-#if !defined(_WIN32) && !defined(__SWITCH__)
++#if !defined(_WIN32) && !defined(__SWITCH__) && !defined(__PS4__)
+   FileSystem::POSIXLock flock(fp.get());
+ #endif
+ 
+diff --git a/src/core/gpu_hw.cpp b/src/core/gpu_hw.cpp
+index 8a297dde..71c6bb08 100644
+--- a/src/core/gpu_hw.cpp
++++ b/src/core/gpu_hw.cpp
+@@ -853,7 +853,7 @@ bool GPU_HW::CompilePipelines()
+   static constexpr u32 NUM_BATCH_TEXTURED_LIMITS_VERTEX_ATTRIBUTES = 5;
+ 
+   GPUPipeline::GraphicsConfig plconfig = {};
+-  plconfig.layout = GPUPipeline::Layout::SingleTextureAndUBO;
++  plconfig.layout = GPUPipeline::Layout::SingleTextureAndPushConstants;
+   plconfig.input_layout.vertex_stride = sizeof(BatchVertex);
+   plconfig.rasterization = GPUPipeline::RasterizationState::GetNoCullState();
+   plconfig.primitive = GPUPipeline::Primitive::Triangles;
+@@ -3123,7 +3123,7 @@ void GPU_HW::FlushRender()
+              m_vram_dirty_draw_rect.right, m_vram_dirty_draw_rect.bottom, m_vram_dirty_draw_rect.GetWidth(),
+              m_vram_dirty_draw_rect.GetHeight());
+ 
+-  if (m_batch_ubo_dirty)
++  if (m_batch_ubo_dirty || g_gpu_device->GetRenderAPI() == RenderAPI::Vulkan)
+   {
+     g_gpu_device->PushUniformBuffer(&m_batch_ubo_data, sizeof(m_batch_ubo_data));
+     // m_counters.num_ubo_updates++;
+diff --git a/src/core/host.cpp b/src/core/host.cpp
+index 1afeb3dc..f75ae155 100644
+--- a/src/core/host.cpp
++++ b/src/core/host.cpp
+@@ -402,6 +402,11 @@ std::unique_ptr<AudioStream> Host::CreateAudioStream(AudioBackend backend, u32 s
+       return AudioStream::CreateXAudio2Stream(sample_rate, channels, buffer_ms, latency_ms, stretch);
+ #endif
+ 
++#ifdef __PS4__
++    case AudioBackend::PS4:
++      return AudioStream::CreatePS4AudioStream(sample_rate, channels, buffer_ms, latency_ms, stretch);
++#endif
++
+ #ifdef __SWITCH__
+     case AudioBackend::Switch:
+       return AudioStream::CreateSwitchAudioStream(sample_rate, channels, buffer_ms, latency_ms, stretch);
+diff --git a/src/core/settings.cpp b/src/core/settings.cpp
+index 759d0b46..7b518be1 100644
+--- a/src/core/settings.cpp
++++ b/src/core/settings.cpp
+@@ -18,6 +18,9 @@
+ #include "common/string_util.h"
+ 
+ #include <algorithm>
++#ifdef __PS4__
++#include "common/ps4_host.h"
++#endif
+ #include <array>
+ #include <cctype>
+ #include <numeric>
+@@ -735,6 +738,16 @@ void Settings::FixIncompatibleSettings(bool display_osd_messages)
+     }
+   }
+ 
++#ifdef __PS4__
++  if ((g_settings.cpu_execution_mode == CPUExecutionMode::Recompiler ||
++       g_settings.cpu_execution_mode == CPUExecutionMode::NewRec) &&
++      !ps4_host_jit_available())
++  {
++    Log_WarningPrintf("No executable memory on this console, using the cached interpreter.");
++    g_settings.cpu_execution_mode = CPUExecutionMode::CachedInterpreter;
++  }
++#endif
++
+ #ifndef ENABLE_MMAP_FASTMEM
+   if (g_settings.cpu_fastmem_mode == CPUFastmemMode::MMap)
+   {
+@@ -1595,6 +1608,9 @@ static constexpr const std::array s_audio_backend_names = {
+ #ifdef __ANDROID__
+   "AAudio",  "OpenSLES",
+ #endif
++#ifdef __PS4__
++  "PS4",
++#endif
+ };
+ static constexpr const std::array s_audio_backend_display_names = {
+   TRANSLATE_NOOP("AudioBackend", "Null (No Output)"),
+@@ -1614,6 +1630,9 @@ static constexpr const std::array s_audio_backend_display_names = {
+   "AAudio",
+   "OpenSL ES",
+ #endif
++#ifdef __PS4__
++  TRANSLATE_NOOP("AudioBackend", "PS4"),
++#endif
+ };
+ 
+ std::optional<AudioBackend> Settings::ParseAudioBackend(const char* str)
+diff --git a/src/core/settings.h b/src/core/settings.h
+index b37a5272..593842c1 100644
+--- a/src/core/settings.h
++++ b/src/core/settings.h
+@@ -483,6 +483,8 @@ struct Settings
+   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::Cubeb;
+ #elif defined(_WIN32)
+   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::XAudio2;
++#elif defined(__PS4__)
++  static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::PS4;
+ #elif defined(__SWITCH__)
+   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::Switch;
+ #elif defined(__ANDROID__)
+diff --git a/src/core/types.h b/src/core/types.h
+index b40ab89e..ba36eb9e 100644
+--- a/src/core/types.h
++++ b/src/core/types.h
+@@ -206,6 +206,9 @@ enum class AudioBackend : u8
+ #endif
+ #ifdef __SWITCH__
+   Switch,
++#endif
++#ifdef __PS4__
++  PS4,
+ #endif
+   Count
+ };
+diff --git a/src/duckstation-nogui/CMakeLists.txt b/src/duckstation-nogui/CMakeLists.txt
+index 96922545..e747f3ec 100644
+--- a/src/duckstation-nogui/CMakeLists.txt
++++ b/src/duckstation-nogui/CMakeLists.txt
+@@ -9,6 +9,13 @@ target_link_libraries(duckstation-nogui PRIVATE core util common imgui scmversio
+ 
+ add_core_resources(duckstation-nogui)
+ 
++if(PS4)
++  target_sources(duckstation-nogui PRIVATE ps4_nogui_platform.cpp)
++  if(COMMAND ps4_duckstation_app)
++    ps4_duckstation_app(duckstation-nogui)
++  endif()
++endif()
++
+ if(NINTENDO_SWITCH)
+   enable_language(ASM)
+ 
+diff --git a/src/duckstation-nogui/nogui_host.cpp b/src/duckstation-nogui/nogui_host.cpp
+index 5e3b0cbf..bcd052ca 100644
+--- a/src/duckstation-nogui/nogui_host.cpp
++++ b/src/duckstation-nogui/nogui_host.cpp
+@@ -46,6 +46,9 @@
+ #ifdef __SWITCH__
+ #include <switch.h>
+ #endif
++#ifdef __PS4__
++#include "common/ps4_host.h"
++#endif
+ 
+ Log_SetChannel(NoGUIHost);
+ 
+@@ -197,7 +200,9 @@ void NoGUIHost::SetAppRoot()
+ 
+ void NoGUIHost::SetResourcesDirectory()
+ {
+-#ifdef NDEBUG
++#if defined(__PS4__)
++  EmuFolders::Resources = Path::Combine(ps4_host_app_dir(), "resources");
++#elif defined(NDEBUG)
+   EmuFolders::Resources = "romfs:/resources";
+ #else
+   EmuFolders::Resources = Path::Combine(EmuFolders::AppRoot, "resources");
+@@ -210,6 +215,12 @@ void NoGUIHost::SetDataDirectory()
+   if (!EmuFolders::DataRoot.empty())
+     return;
+ 
++#ifdef __PS4__
++  EmuFolders::DataRoot = ps4_host_data_dir();
++  FileSystem::EnsureDirectoryExists(EmuFolders::DataRoot.c_str(), false);
++  return;
++#endif
++
+   if (ShouldUsePortableMode())
+   {
+     EmuFolders::DataRoot = EmuFolders::AppRoot;
+@@ -830,7 +841,11 @@ void Host::PumpMessagesOnCPUThread()
+ 
+ std::unique_ptr<NoGUIPlatform> NoGUIHost::CreatePlatform()
+ {
++#ifdef __PS4__
++  return NoGUIPlatform::CreatePS4Platform();
++#else
+   return NoGUIPlatform::CreateSwitchPlatform();
++#endif
+ }
+ 
+ std::string NoGUIHost::GetWindowTitle(const std::string& game_title)
+@@ -976,7 +991,7 @@ static void SignalHandler(int signal)
+   std::signal(signal, SIG_DFL);
+ 
+   // MacOS is missing std::quick_exit() despite it being C++11...
+-#if !defined(__APPLE__) && !defined(__SWITCH__)
++#if !defined(__APPLE__) && !defined(__SWITCH__) && !defined(__PS4__)
+   std::quick_exit(1);
+ #else
+   _Exit(1);
+@@ -1442,5 +1457,8 @@ int main(int argc, char* argv[])
+ 
+   NoGUIHost::s_base_settings_interface.reset();
+   g_nogui_window.reset();
++#ifdef __PS4__
++  ps4_host_exit(EXIT_SUCCESS);
++#endif
+   return EXIT_SUCCESS;
+ }
+diff --git a/src/duckstation-nogui/nogui_platform.h b/src/duckstation-nogui/nogui_platform.h
+index faa3d5b2..ad1a5e97 100644
+--- a/src/duckstation-nogui/nogui_platform.h
++++ b/src/duckstation-nogui/nogui_platform.h
+@@ -58,6 +58,9 @@ public:
+ #ifdef __SWITCH__
+   static std::unique_ptr<NoGUIPlatform> CreateSwitchPlatform();
+ #endif
++#ifdef __PS4__
++  static std::unique_ptr<NoGUIPlatform> CreatePS4Platform();
++#endif
+ #ifdef NOGUI_PLATFORM_WAYLAND
+   static std::unique_ptr<NoGUIPlatform> CreateWaylandPlatform();
+ #endif
+diff --git a/src/duckstation-nogui/ps4_nogui_platform.cpp b/src/duckstation-nogui/ps4_nogui_platform.cpp
+new file mode 100644
+index 00000000..a2a8ea92
+--- /dev/null
++++ b/src/duckstation-nogui/ps4_nogui_platform.cpp
+@@ -0,0 +1,167 @@
++#include "nogui_host.h"
++#include "nogui_platform.h"
++
++#include "common/log.h"
++#include "common/ps4_host.h"
++#include "common/settings_interface.h"
++
++#include "core/host.h"
++
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <deque>
++#include <functional>
++#include <mutex>
++
++Log_SetChannel(PS4NoGUIPlatform);
++
++namespace {
++
++class PS4NoGUIPlatform final : public NoGUIPlatform
++{
++public:
++  PS4NoGUIPlatform() = default;
++  ~PS4NoGUIPlatform() override = default;
++
++  void ReportError(const std::string_view& title, const std::string_view& message) override
++  {
++    Log_ErrorFmt("{}: {}", title, message);
++    std::string text = fmt::format("DuckStation: {}\n{}", title, message.substr(0, 400));
++    ps4_host_notify(text.c_str());
++  }
++
++  bool ConfirmMessage(const std::string_view& title, const std::string_view& message) override
++  {
++    Log_WarningFmt("{}: {}", title, message);
++    return true;
++  }
++
++  void SetDefaultConfig(SettingsInterface& si) override;
++
++  bool CreatePlatformWindow(std::string title) override { return true; }
++  bool HasPlatformWindow() const override { return true; }
++  void DestroyPlatformWindow() override {}
++
++  std::optional<WindowInfo> GetPlatformWindowInfo() override
++  {
++    WindowInfo wi;
++    wi.type = WindowInfo::Type::PS4;
++    wi.surface_width = 1920;
++    wi.surface_height = 1080;
++    wi.surface_scale = 1.0f;
++    wi.surface_refresh_rate = 60.0f;
++    wi.surface_format = GPUTexture::Format::RGBA8;
++    return wi;
++  }
++
++  void SetPlatformWindowTitle(std::string title) override {}
++
++  std::optional<u32> ConvertHostKeyboardStringToCode(const std::string_view& str) override { return std::nullopt; }
++  std::optional<std::string> ConvertHostKeyboardCodeToString(u32 code) override { return std::nullopt; }
++
++  void RunMessageLoop() override
++  {
++    std::unique_lock lock(m_mutex);
++    while (m_running.load(std::memory_order_acquire))
++    {
++      m_cv.wait_for(lock, std::chrono::milliseconds(50),
++                    [this]() { return !m_queue.empty() || !m_running.load(std::memory_order_acquire); });
++      while (!m_queue.empty())
++      {
++        std::function<void()> func = std::move(m_queue.front());
++        m_queue.pop_front();
++        lock.unlock();
++        func();
++        lock.lock();
++      }
++    }
++  }
++
++  void ExecuteInMessageLoop(std::function<void()> func) override
++  {
++    {
++      std::unique_lock lock(m_mutex);
++      m_queue.push_back(std::move(func));
++    }
++    m_cv.notify_one();
++  }
++
++  void QuitMessageLoop() override
++  {
++    m_running.store(false, std::memory_order_release);
++    m_cv.notify_one();
++  }
++
++  void SetFullscreen(bool enabled) override {}
++  bool RequestRenderWindowSize(s32 new_window_width, s32 new_window_height) override { return false; }
++  bool OpenURL(const std::string_view& url) override { return false; }
++  bool CopyTextToClipboard(const std::string_view& text) override { return false; }
++
++private:
++  std::mutex m_mutex;
++  std::condition_variable m_cv;
++  std::deque<std::function<void()>> m_queue;
++  std::atomic_bool m_running{true};
++};
++
++void PS4NoGUIPlatform::SetDefaultConfig(SettingsInterface& si)
++{
++  si.SetStringValue("CPU", "ExecutionMode", "Recompiler");
++  si.SetStringValue("CPU", "FastmemMode", "LUT");
++
++  si.SetStringValue("GPU", "Renderer", "Vulkan");
++  si.SetIntValue("GPU", "ResolutionScale", 3);
++  si.SetBoolValue("GPU", "UseThread", true);
++  si.SetBoolValue("GPU", "ThreadedPresentation", true);
++  si.SetBoolValue("GPU", "PGXPEnable", true);
++  si.SetBoolValue("GPU", "PGXPCulling", true);
++  si.SetBoolValue("GPU", "PGXPTextureCorrection", true);
++
++  si.SetBoolValue("Display", "VSync", true);
++  si.SetBoolValue("Main", "SyncToHostRefreshRate", true);
++  si.SetBoolValue("Main", "PauseOnFocusLoss", false);
++  si.SetBoolValue("Main", "ConfirmPowerOff", false);
++  si.SetBoolValue("Main", "SaveStateOnExit", true);
++
++  si.SetBoolValue("Logging", "LogToFile", true);
++
++  si.ClearSection("InputSources");
++  si.SetBoolValue("InputSources", "PS4", true);
++
++  const std::string data_dir = ps4_host_data_dir();
++  si.SetStringValue("BIOS", "SearchDirectory", (data_dir + "/bios").c_str());
++  si.ClearSection("GameList");
++  si.AddToStringList("GameList", "RecursivePaths", (data_dir + "/games").c_str());
++  si.AddToStringList("GameList", "RecursivePaths", "/mnt/usb0/PS1");
++  si.AddToStringList("GameList", "RecursivePaths", "/mnt/usb1/PS1");
++
++  static constexpr const char* buttons[][2] = {
++    {"Up", "DPadUp"},     {"Right", "DPadRight"}, {"Down", "DPadDown"},     {"Left", "DPadLeft"},
++    {"Triangle", "Triangle"}, {"Circle", "Circle"}, {"Cross", "Cross"},     {"Square", "Square"},
++    {"Select", "TouchPad"}, {"Start", "Options"},  {"L1", "L1"},             {"R1", "R1"},
++    {"L2", "L2"},         {"R2", "R2"},           {"L3", "L3"},             {"R3", "R3"},
++    {"LLeft", "-LeftX"},  {"LRight", "+LeftX"},   {"LUp", "-LeftY"},        {"LDown", "+LeftY"},
++    {"RLeft", "-RightX"}, {"RRight", "+RightX"},  {"RUp", "-RightY"},       {"RDown", "+RightY"},
++    {"LargeMotor", "LargeMotor"}, {"SmallMotor", "SmallMotor"},
++  };
++
++  for (u32 port = 0; port < 2; port++)
++  {
++    const std::string section = fmt::format("Pad{}", port + 1);
++    si.ClearSection(section.c_str());
++    si.SetStringValue(section.c_str(), "Type", "AnalogController");
++    for (const auto& [name, binding] : buttons)
++      si.SetStringValue(section.c_str(), name, fmt::format("P{}/{}", port, binding).c_str());
++  }
++
++  si.ClearSection("Hotkeys");
++  si.SetStringValue("Hotkeys", "OpenPauseMenu", "P0/L3 & P0/R3");
++}
++
++}
++
++std::unique_ptr<NoGUIPlatform> NoGUIPlatform::CreatePS4Platform()
++{
++  return std::make_unique<PS4NoGUIPlatform>();
++}
+diff --git a/src/util/CMakeLists.txt b/src/util/CMakeLists.txt
+index a54b648e..74b81772 100644
+--- a/src/util/CMakeLists.txt
++++ b/src/util/CMakeLists.txt
+@@ -168,11 +168,14 @@ if(ENABLE_VULKAN)
+   target_link_libraries(util PUBLIC vulkan-headers)
+ endif()
+ 
+-if(ENABLE_VULKAN OR APPLE)
++if(PS4)
++  target_sources(util PRIVATE ps4_glslang.cpp ps4_glslang.h)
++  target_link_libraries(util PRIVATE ps4::glslang)
++elseif(ENABLE_VULKAN OR APPLE)
+   target_link_libraries(util PUBLIC Shaderc::shaderc_shared)
+ endif()
+ 
+-if(NOT ANDROID AND NOT NINTENDO_SWITCH)
++if(NOT ANDROID AND NOT NINTENDO_SWITCH AND NOT PS4)
+   target_sources(util PRIVATE
+     cubeb_audio_stream.cpp
+     sdl_audio_stream.cpp
+@@ -251,6 +254,14 @@ elseif(APPLE)
+   find_library(QUARTZCORE_LIBRARY QuartzCore)
+   target_link_libraries(util PRIVATE ${METAL_LIBRARY} ${QUARTZCORE_LIBRARY} ${IOK_LIBRARY} spirv-cross-c-shared)
+   set_source_files_properties(${MAC_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS TRUE)
++elseif(PS4)
++  target_sources(util PRIVATE
++    platform_misc_ps4.cpp
++    ps4_input_source.cpp
++    ps4_input_source.h
++    ps4_audio_stream.cpp
++    http_downloader_ps4.cpp
++  )
+ elseif(NOT ANDROID AND NOT NINTENDO_SWITCH)
+   target_sources(util PRIVATE
+     platform_misc_unix.cpp
+@@ -286,7 +297,7 @@ elseif(NINTENDO_SWITCH)
+   endif()
+ endif()
+ 
+-if(NOT WIN32 AND NOT ANDROID)
++if(NOT WIN32 AND NOT ANDROID AND NOT PS4)
+   target_sources(util PRIVATE
+     http_downloader_curl.cpp
+     http_downloader_curl.h
+diff --git a/src/util/audio_stream.h b/src/util/audio_stream.h
+index fde225b2..c150c116 100644
+--- a/src/util/audio_stream.h
++++ b/src/util/audio_stream.h
+@@ -97,6 +97,10 @@ public:
+   static std::unique_ptr<AudioStream> CreateSwitchAudioStream(u32 sample_rate, u32 channels, u32 buffer_ms,
+                                                               u32 latency_ms, AudioStretchMode stretch);
+ #endif
++#ifdef __PS4__
++  static std::unique_ptr<AudioStream> CreatePS4AudioStream(u32 sample_rate, u32 channels, u32 buffer_ms,
++                                                           u32 latency_ms, AudioStretchMode stretch);
++#endif
+ 
+ protected:
+   AudioStream(u32 sample_rate, u32 channels, u32 buffer_ms, AudioStretchMode stretch);
+diff --git a/src/util/gpu_device.cpp b/src/util/gpu_device.cpp
+index 8022f253..ed42c1e6 100644
+--- a/src/util/gpu_device.cpp
++++ b/src/util/gpu_device.cpp
+@@ -19,6 +19,9 @@
+ #include "imgui.h"
+ #include "xxhash.h"
+ 
++#include <thread>
++#include <vector>
++
+ Log_SetChannel(GPUDevice);
+ 
+ #ifdef _WIN32
+@@ -395,6 +398,27 @@ void GPUDevice::CloseShaderCache()
+   }
+ }
+ 
++#ifdef __PS4__
++void GPUDevice::PS4SavePipelineCache()
++{
++  static size_t s_saved_size = 0;
++  if (s_pipeline_cache_path.empty())
++    return;
++
++  DynamicHeapArray<u8> data;
++  if (!GetPipelineCacheData(&data) || data.size() == s_saved_size)
++    return;
++
++  s_saved_size = data.size();
++  std::vector<u8> copy(data.data(), data.data() + data.size());
++  std::thread([path = s_pipeline_cache_path, copy = std::move(copy)]() {
++    const std::string tmp = path + ".tmp";
++    if (FileSystem::WriteBinaryFile(tmp.c_str(), copy.data(), copy.size()))
++      FileSystem::RenamePath(tmp.c_str(), path.c_str());
++  }).detach();
++}
++#endif
++
+ std::string GPUDevice::GetShaderCacheBaseName(const std::string_view& type) const
+ {
+   const std::string_view debug_suffix = m_debug_device ? "_debug" : "";
+diff --git a/src/util/gpu_device.h b/src/util/gpu_device.h
+index 4b83cb0a..a7e8db98 100644
+--- a/src/util/gpu_device.h
++++ b/src/util/gpu_device.h
+@@ -767,6 +767,11 @@ private:
+ 
+   void OpenShaderCache(const std::string_view& base_path, u32 version);
+   void CloseShaderCache();
++#ifdef __PS4__
++public:
++  void PS4SavePipelineCache();
++protected:
++#endif
+   bool CreateResources();
+   void DestroyResources();
+ 
+diff --git a/src/util/http_downloader_ps4.cpp b/src/util/http_downloader_ps4.cpp
+new file mode 100644
+index 00000000..ea3f55a7
+--- /dev/null
++++ b/src/util/http_downloader_ps4.cpp
+@@ -0,0 +1,6 @@
++#include "http_downloader.h"
++
++std::unique_ptr<HTTPDownloader> HTTPDownloader::Create(std::string user_agent)
++{
++  return {};
++}
+diff --git a/src/util/input_manager.cpp b/src/util/input_manager.cpp
+index 572be5df..6db0eabf 100644
+--- a/src/util/input_manager.cpp
++++ b/src/util/input_manager.cpp
+@@ -608,6 +608,9 @@ static std::array<const char*, static_cast<u32>(InputSourceType::Count)> s_input
+ #ifdef __ANDROID__
+   "Android",
+ #endif
++#ifdef __PS4__
++  "PS4",
++#endif
+ }};
+ 
+ InputSource* InputManager::GetInputSourceInterface(InputSourceType type)
+@@ -653,6 +656,11 @@ bool InputManager::GetInputSourceDefaultEnabled(InputSourceType type)
+       return true;
+ #endif
+ 
++#ifdef __PS4__
++    case InputSourceType::PS4:
++      return true;
++#endif
++
+     default:
+       return false;
+   }
+@@ -1967,4 +1975,7 @@ void InputManager::ReloadSources(SettingsInterface& si, std::unique_lock<std::mu
+ #ifdef __SWITCH__
+   UpdateInputSourceState(si, settings_lock, InputSourceType::Switch, &InputSource::CreateSwitchSource);
+ #endif
++#ifdef __PS4__
++  UpdateInputSourceState(si, settings_lock, InputSourceType::PS4, &InputSource::CreatePS4Source);
++#endif
+ }
+diff --git a/src/util/input_manager.h b/src/util/input_manager.h
+index 8a230c8e..306b795f 100644
+--- a/src/util/input_manager.h
++++ b/src/util/input_manager.h
+@@ -37,6 +37,9 @@ enum class InputSourceType : u32
+ #endif
+ #ifdef __SWITCH__
+   Switch,
++#endif
++#ifdef __PS4__
++  PS4,
+ #endif
+   Count,
+ };
+diff --git a/src/util/input_source.h b/src/util/input_source.h
+index 3c512f5e..75e3d3a1 100644
+--- a/src/util/input_source.h
++++ b/src/util/input_source.h
+@@ -85,4 +85,7 @@ public:
+ #ifdef __SWITCH__
+   static std::unique_ptr<InputSource> CreateSwitchSource();
+ #endif
++#ifdef __PS4__
++  static std::unique_ptr<InputSource> CreatePS4Source();
++#endif
+ };
+diff --git a/src/util/jit_code_buffer.cpp b/src/util/jit_code_buffer.cpp
+index efad1d80..61de5e4b 100644
+--- a/src/util/jit_code_buffer.cpp
++++ b/src/util/jit_code_buffer.cpp
+@@ -19,6 +19,9 @@ Log_SetChannel(JitCodeBuffer);
+ #include <stdlib.h>
+ 
+ extern "C" char __start__;
++#elif defined(__PS4__)
++#include "common/ps4_host.h"
++#include <errno.h>
+ #else
+ #include <errno.h>
+ #include <sys/mman.h>
+@@ -49,7 +52,15 @@ bool JitCodeBuffer::Allocate(u32 size /* = 64 * 1024 * 1024 */, u32 far_code_siz
+ 
+   m_total_size = size + far_code_size;
+ 
+-#ifdef CPU_ARCH_X64
++#if defined(__PS4__)
++  m_code_ptr = static_cast<u8*>(ps4_host_jit_alloc(m_total_size));
++  if (!m_code_ptr)
++  {
++    Log_ErrorPrint("No executable memory for the recompiler");
++    return false;
++  }
++  Log_InfoFmt("Allocated JIT buffer of size {} at {}", m_total_size, static_cast<void*>(m_code_ptr));
++#elif defined(CPU_ARCH_X64)
+   // Try to find a region in 32-bit range of ourselves.
+   // Assume that the DuckStation binary will at max be 256MB. Therefore the max offset is
+   // +/- 256MB + round_up_pow2(size). This'll be 512MB for the JITs.
+@@ -176,6 +187,8 @@ bool JitCodeBuffer::TryAllocateAt(const void* addr)
+   }
+ 
+   return true;
++#elif defined(__PS4__)
++  return false;
+ #elif defined(__linux__) || defined(__ANDROID__) || defined(__APPLE__) || defined(__HAIKU__) || defined(__FreeBSD__)
+   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+ #if defined(__linux__)
+@@ -297,6 +310,8 @@ void JitCodeBuffer::Destroy()
+ #if defined(_WIN32)
+     if (!VirtualFree(m_code_ptr, 0, MEM_RELEASE))
+       Log_ErrorPrintf("Failed to free code pointer %p", m_code_ptr);
++#elif defined(__PS4__)
++    ps4_host_jit_free(m_code_ptr, m_total_size);
+ #elif defined(__linux__) || defined(__ANDROID__) || defined(__APPLE__) || defined(__HAIKU__) || defined(__FreeBSD__)
+     if (munmap(m_code_ptr, m_total_size) != 0)
+       Log_ErrorPrintf("Failed to free code pointer %p", m_code_ptr);
+diff --git a/src/util/jit_code_buffer.h b/src/util/jit_code_buffer.h
+index da7706d5..e98bd1b5 100644
+--- a/src/util/jit_code_buffer.h
++++ b/src/util/jit_code_buffer.h
+@@ -7,6 +7,8 @@
+ #endif
+ #include "common/types.h"
+ 
++#include <cstddef>
++
+ class JitCodeBuffer
+ {
+ public:
+diff --git a/src/util/page_fault_handler.cpp b/src/util/page_fault_handler.cpp
+index 101994f4..09f7fd20 100644
+--- a/src/util/page_fault_handler.cpp
++++ b/src/util/page_fault_handler.cpp
+@@ -124,13 +124,13 @@ static LONG ExceptionHandler(PEXCEPTION_POINTERS exi)
+ #elif defined(USE_SIGSEGV)
+ 
+ static struct sigaction s_old_sigsegv_action;
+-#if defined(__APPLE__) || defined(__aarch64__)
++#if defined(__APPLE__) || defined(__aarch64__) || defined(__PS4__)
+ static struct sigaction s_old_sigbus_action;
+ #endif
+ 
+ static void CallExistingSignalHandler(int signal, siginfo_t* siginfo, void* ctx)
+ {
+-#if defined(__aarch64__)
++#if defined(__aarch64__) || defined(__PS4__)
+   const struct sigaction& sa = (signal == SIGBUS) ? s_old_sigbus_action : s_old_sigsegv_action;
+ #elif defined(__APPLE__)
+   const struct sigaction& sa = s_old_sigbus_action;
+@@ -290,7 +290,7 @@ bool InstallHandler(Handler handler)
+ #endif
+     if (sigaction(SIGSEGV, &sa, &s_old_sigsegv_action) != 0)
+       return false;
+-#if defined(__APPLE__) || defined(__aarch64__)
++#if defined(__APPLE__) || defined(__aarch64__) || defined(__PS4__)
+     // MacOS uses SIGBUS for memory permission violations
+     if (sigaction(SIGBUS, &sa, &s_old_sigbus_action) != 0)
+       return false;
+@@ -322,7 +322,7 @@ bool RemoveHandler(Handler handler)
+   s_veh_handle = nullptr;
+ #elif defined(USE_SIGSEGV)
+   struct sigaction sa;
+-#if defined(__APPLE__) || defined(__aarch64__)
++#if defined(__APPLE__) || defined(__aarch64__) || defined(__PS4__)
+   sigaction(SIGBUS, &s_old_sigbus_action, &sa);
+   s_old_sigbus_action = {};
+ #endif
+diff --git a/src/util/platform_misc_ps4.cpp b/src/util/platform_misc_ps4.cpp
+new file mode 100644
+index 00000000..3274bb15
+--- /dev/null
++++ b/src/util/platform_misc_ps4.cpp
+@@ -0,0 +1,18 @@
++#include "platform_misc.h"
++
++namespace PlatformMisc {
++
++void SuspendScreensaver()
++{
++}
++
++void ResumeScreensaver()
++{
++}
++
++bool PlaySoundAsync(const char* path)
++{
++  return false;
++}
++
++}
+diff --git a/src/util/ps4_audio_stream.cpp b/src/util/ps4_audio_stream.cpp
+new file mode 100644
+index 00000000..b5802f12
+--- /dev/null
++++ b/src/util/ps4_audio_stream.cpp
+@@ -0,0 +1,163 @@
++#include "audio_stream.h"
++
++#include "common/log.h"
++#include "common/threading.h"
++
++#include <orbis/AudioOut.h>
++
++#include <algorithm>
++#include <atomic>
++#include <cstring>
++#include <thread>
++#include <vector>
++
++Log_SetChannel(PS4AudioStream);
++
++namespace {
++
++class PS4AudioStream final : public AudioStream
++{
++public:
++  PS4AudioStream(u32 sample_rate, u32 channels, u32 buffer_ms, AudioStretchMode stretch)
++    : AudioStream(sample_rate, channels, buffer_ms, stretch)
++  {
++  }
++
++  ~PS4AudioStream() override
++  {
++    m_running.store(false, std::memory_order_release);
++    if (m_thread.joinable())
++      m_thread.join();
++    if (m_port >= 0)
++      sceAudioOutClose(m_port);
++  }
++
++  void SetPaused(bool paused) override { m_paused.store(paused, std::memory_order_release); }
++
++  void SetOutputVolume(u32 volume) override
++  {
++    m_volume = volume;
++    m_thread_volume.store(volume, std::memory_order_release);
++  }
++
++  bool Initialize()
++  {
++    sceAudioOutInit();
++    m_port = sceAudioOutOpen(0xFF, ORBIS_AUDIO_OUT_PORT_TYPE_MAIN, 0, OUTPUT_FRAMES, OUTPUT_RATE,
++                             ORBIS_AUDIO_OUT_PARAM_FORMAT_S16_STEREO);
++    if (m_port < 0)
++    {
++      Log_ErrorFmt("sceAudioOutOpen failed: {:08X}", static_cast<u32>(m_port));
++      return false;
++    }
++
++    m_thread_volume.store(m_volume, std::memory_order_release);
++    BaseInitialize();
++    m_running.store(true, std::memory_order_release);
++    m_thread = std::thread(&PS4AudioStream::AudioThread, this);
++    return true;
++  }
++
++private:
++  static constexpr u32 OUTPUT_FRAMES = 256;
++  static constexpr u32 OUTPUT_RATE = 48000;
++
++  void AudioThread()
++  {
++    Threading::SetNameOfCurrentThread("Audio Output");
++
++    const u32 ch = m_channels;
++    const double step = static_cast<double>(m_sample_rate) / static_cast<double>(OUTPUT_RATE);
++    const bool resample = (m_sample_rate != OUTPUT_RATE);
++    const u32 max_input = static_cast<u32>(OUTPUT_FRAMES * step) + 4;
++
++    alignas(64) s16 out[2][OUTPUT_FRAMES * 2];
++    std::vector<s16> in((max_input + 4) * ch);
++    u32 in_frames = 0;
++    double pos = 0.0;
++    u32 buffer = 0;
++
++    while (m_running.load(std::memory_order_acquire))
++    {
++      s16* dst = out[buffer];
++      buffer ^= 1;
++
++      if (m_paused.load(std::memory_order_acquire))
++      {
++        std::memset(dst, 0, sizeof(out[0]));
++      }
++      else if (!resample)
++      {
++        if (ch == 2)
++        {
++          ReadFrames(dst, OUTPUT_FRAMES);
++        }
++        else
++        {
++          ReadFrames(in.data(), OUTPUT_FRAMES);
++          for (u32 i = 0; i < OUTPUT_FRAMES; i++)
++            dst[i * 2] = dst[i * 2 + 1] = in[i];
++        }
++      }
++      else
++      {
++        const u32 needed = static_cast<u32>(pos + OUTPUT_FRAMES * step) + 2;
++        if (in_frames < needed)
++        {
++          ReadFrames(&in[in_frames * ch], needed - in_frames);
++          in_frames = needed;
++        }
++
++        for (u32 i = 0; i < OUTPUT_FRAMES; i++)
++        {
++          const u32 idx = static_cast<u32>(pos);
++          const s32 frac = static_cast<s32>((pos - idx) * 65536.0);
++          const s16* a = &in[idx * ch];
++          const s16* b = &in[(idx + 1) * ch];
++          const s32 l = a[0] + (((b[0] - a[0]) * frac) >> 16);
++          const s32 r = (ch > 1) ? (a[1] + (((b[1] - a[1]) * frac) >> 16)) : l;
++          dst[i * 2] = static_cast<s16>(l);
++          dst[i * 2 + 1] = static_cast<s16>(r);
++          pos += step;
++        }
++
++        const u32 consumed = std::min(static_cast<u32>(pos), in_frames);
++        if (consumed > 0)
++        {
++          std::memmove(in.data(), &in[consumed * ch], (in_frames - consumed) * ch * sizeof(s16));
++          in_frames -= consumed;
++          pos -= consumed;
++        }
++      }
++
++      const u32 volume = m_thread_volume.load(std::memory_order_acquire);
++      if (volume < 100)
++      {
++        const s32 scale = static_cast<s32>(volume * 65536 / 100);
++        for (u32 i = 0; i < OUTPUT_FRAMES * 2; i++)
++          dst[i] = static_cast<s16>((dst[i] * scale) >> 16);
++      }
++
++      sceAudioOutOutput(m_port, dst);
++    }
++
++    sceAudioOutOutput(m_port, nullptr);
++  }
++
++  s32 m_port = -1;
++  std::thread m_thread;
++  std::atomic_bool m_running{false};
++  std::atomic_bool m_paused{false};
++  std::atomic<u32> m_thread_volume{100};
++};
++
++}
++
++std::unique_ptr<AudioStream> AudioStream::CreatePS4AudioStream(u32 sample_rate, u32 channels, u32 buffer_ms,
++                                                               u32 latency_ms, AudioStretchMode stretch)
++{
++  std::unique_ptr<PS4AudioStream> stream = std::make_unique<PS4AudioStream>(sample_rate, channels, buffer_ms, stretch);
++  if (!stream->Initialize())
++    stream.reset();
++  return stream;
++}
+diff --git a/src/util/ps4_glslang.cpp b/src/util/ps4_glslang.cpp
+new file mode 100644
+index 00000000..15b29adf
+--- /dev/null
++++ b/src/util/ps4_glslang.cpp
+@@ -0,0 +1,69 @@
++#include "ps4_glslang.h"
++
++#include <glslang/Public/ResourceLimits.h>
++#include <glslang/Public/ShaderLang.h>
++#include <glslang/SPIRV/GlslangToSpv.h>
++
++#include <memory>
++#include <mutex>
++
++static std::once_flag s_glslang_once;
++
++bool PS4GLSLToSPIRV(u32 stage, std::string_view source, const char* entry_point, std::vector<u32>* spirv,
++                    std::string* errors)
++{
++  static constexpr EShLanguage stages[] = {EShLangVertex, EShLangFragment, EShLangGeometry, EShLangCompute};
++  if (stage >= std::size(stages))
++  {
++    *errors = "unknown shader stage";
++    return false;
++  }
++
++  std::call_once(s_glslang_once, []() { glslang::InitializeProcess(); });
++
++  const EShLanguage lang = stages[stage];
++  glslang::TShader shader(lang);
++  const char* text = source.data();
++  const int length = static_cast<int>(source.length());
++  const char* name = "source";
++  shader.setStringsWithLengthsAndNames(&text, &length, &name, 1);
++  shader.setEntryPoint("main");
++  if (entry_point && entry_point[0] && std::string_view(entry_point) != "main")
++    shader.setSourceEntryPoint(entry_point);
++  shader.setEnvInput(glslang::EShSourceGlsl, lang, glslang::EShClientVulkan, 100);
++  shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_0);
++  shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_0);
++
++  const EShMessages messages = static_cast<EShMessages>(EShMsgSpvRules | EShMsgVulkanRules);
++  if (!shader.parse(GetDefaultResources(), 110, ENoProfile, false, false, messages))
++  {
++    *errors = shader.getInfoLog();
++    *errors += shader.getInfoDebugLog();
++    return false;
++  }
++
++  glslang::TProgram program;
++  program.addShader(&shader);
++  if (!program.link(messages))
++  {
++    *errors = program.getInfoLog();
++    *errors += program.getInfoDebugLog();
++    return false;
++  }
++
++  glslang::SpvOptions options;
++  options.generateDebugInfo = false;
++  options.disableOptimizer = true;
++  options.optimizeSize = false;
++  options.validate = false;
++  spv::SpvBuildLogger logger;
++  spirv->clear();
++  glslang::GlslangToSpv(*program.getIntermediate(lang), *spirv, &logger, &options);
++  if (spirv->empty())
++  {
++    *errors = logger.getAllMessages();
++    return false;
++  }
++
++  return true;
++}
+diff --git a/src/util/ps4_glslang.h b/src/util/ps4_glslang.h
+new file mode 100644
+index 00000000..55db01c5
+--- /dev/null
++++ b/src/util/ps4_glslang.h
+@@ -0,0 +1,10 @@
++#pragma once
++
++#include "common/types.h"
++
++#include <string>
++#include <string_view>
++#include <vector>
++
++bool PS4GLSLToSPIRV(u32 stage, std::string_view source, const char* entry_point, std::vector<u32>* spirv,
++                    std::string* errors);
+diff --git a/src/util/ps4_input_source.cpp b/src/util/ps4_input_source.cpp
+new file mode 100644
+index 00000000..3a597b0c
+--- /dev/null
++++ b/src/util/ps4_input_source.cpp
+@@ -0,0 +1,443 @@
++#include "ps4_input_source.h"
++#include "input_manager.h"
++
++#include "common/bitutils.h"
++#include "common/log.h"
++#include "common/string_util.h"
++#include "common/timer.h"
++
++#include "core/host.h"
++
++#include <orbis/Pad.h>
++#include <orbis/UserService.h>
++
++#include <algorithm>
++#include <unistd.h>
++
++Log_SetChannel(PS4InputSource);
++
++static constexpr u32 PAD_INTERCEPTED = 0x80000000u;
++
++struct PS4Button
++{
++  const char* name;
++  u32 mask;
++  GenericInputBinding generic;
++};
++
++static constexpr u32 TOUCH_LEFT = 1u << 30;
++static constexpr u32 TOUCH_RIGHT = 1u << 29;
++
++static constexpr PS4Button s_buttons[] = {
++  {"Cross", ORBIS_PAD_BUTTON_CROSS, GenericInputBinding::Cross},
++  {"Circle", ORBIS_PAD_BUTTON_CIRCLE, GenericInputBinding::Circle},
++  {"Square", ORBIS_PAD_BUTTON_SQUARE, GenericInputBinding::Square},
++  {"Triangle", ORBIS_PAD_BUTTON_TRIANGLE, GenericInputBinding::Triangle},
++  {"L1", ORBIS_PAD_BUTTON_L1, GenericInputBinding::L1},
++  {"R1", ORBIS_PAD_BUTTON_R1, GenericInputBinding::R1},
++  {"L2", ORBIS_PAD_BUTTON_L2, GenericInputBinding::L2},
++  {"R2", ORBIS_PAD_BUTTON_R2, GenericInputBinding::R2},
++  {"L3", ORBIS_PAD_BUTTON_L3, GenericInputBinding::L3},
++  {"R3", ORBIS_PAD_BUTTON_R3, GenericInputBinding::R3},
++  {"Options", ORBIS_PAD_BUTTON_OPTIONS, GenericInputBinding::Start},
++  {"TouchPad", ORBIS_PAD_BUTTON_TOUCH_PAD, GenericInputBinding::Select},
++  {"DPadUp", ORBIS_PAD_BUTTON_UP, GenericInputBinding::DPadUp},
++  {"DPadDown", ORBIS_PAD_BUTTON_DOWN, GenericInputBinding::DPadDown},
++  {"DPadLeft", ORBIS_PAD_BUTTON_LEFT, GenericInputBinding::DPadLeft},
++  {"DPadRight", ORBIS_PAD_BUTTON_RIGHT, GenericInputBinding::DPadRight},
++  {"TouchLeft", TOUCH_LEFT, GenericInputBinding::Unknown},
++  {"TouchRight", TOUCH_RIGHT, GenericInputBinding::Unknown},
++};
++static_assert(std::size(s_buttons) == PS4InputSource::NUM_BUTTONS);
++
++static constexpr const char* s_axis_names[] = {"LeftX", "LeftY", "RightX", "RightY"};
++static constexpr GenericInputBinding s_generic_axis[][2] = {
++  {GenericInputBinding::LeftStickLeft, GenericInputBinding::LeftStickRight},
++  {GenericInputBinding::LeftStickUp, GenericInputBinding::LeftStickDown},
++  {GenericInputBinding::RightStickLeft, GenericInputBinding::RightStickRight},
++  {GenericInputBinding::RightStickUp, GenericInputBinding::RightStickDown},
++};
++
++static float StickValue(u8 value)
++{
++  return std::clamp((static_cast<float>(value) - 128.0f) / 127.0f, -1.0f, 1.0f);
++}
++
++PS4InputSource::PS4InputSource() = default;
++
++PS4InputSource::~PS4InputSource() = default;
++
++bool PS4InputSource::OpenPad(s32 user, u32 slot, int attempts)
++{
++  s32 handle = scePadOpen(user, 0, 0, nullptr);
++  for (int attempt = 1; attempt < attempts && handle < 0; attempt++)
++  {
++    usleep(100000);
++    handle = scePadOpen(user, 0, 0, nullptr);
++  }
++  if (handle < 0)
++  {
++    Log_WarningFmt("scePadOpen for user {:X} failed: {:08X}", static_cast<u32>(user), static_cast<u32>(handle));
++    return false;
++  }
++
++  ControllerData& cd = m_controllers[slot];
++  cd.handle = handle;
++  cd.user = user;
++  cd.connected = false;
++  cd.buttons = 0;
++  cd.axes = {};
++  Log_InfoFmt("Pad {}: user {:X}, handle {}", slot, static_cast<u32>(user), handle);
++  return true;
++}
++
++void PS4InputSource::ScanUsers()
++{
++  OrbisUserServiceLoginUserIdList users = {};
++  if (sceUserServiceGetLoginUserIdList(&users) != 0)
++    return;
++
++  for (s32 user : users.userId)
++  {
++    if (user == -1 || user == 0)
++      continue;
++
++    bool known = false;
++    int free_slot = -1;
++    for (u32 i = 0; i < NUM_CONTROLLERS; i++)
++    {
++      if (m_controllers[i].handle >= 0 && m_controllers[i].user == user)
++        known = true;
++      else if (m_controllers[i].handle < 0 && free_slot < 0)
++        free_slot = static_cast<int>(i);
++    }
++
++    if (!known && free_slot >= 0)
++      OpenPad(user, static_cast<u32>(free_slot), 1);
++  }
++}
++
++bool PS4InputSource::Initialize(SettingsInterface& si, std::unique_lock<std::mutex>& settings_lock)
++{
++  sceUserServiceInitialize(nullptr);
++  scePadInit();
++
++  u32 count = 0;
++  OrbisUserServiceLoginUserIdList users = {};
++  if (sceUserServiceGetLoginUserIdList(&users) == 0)
++  {
++    for (s32 user : users.userId)
++    {
++      if (user != -1 && user != 0 && count < NUM_CONTROLLERS && OpenPad(user, count, count == 0 ? 10 : 1))
++        count++;
++    }
++  }
++
++  if (count == 0)
++  {
++    s32 user = -1;
++    sceUserServiceGetInitialUser(&user);
++    if (!OpenPad(user, 0, 10))
++      Log_ErrorPrint("No pad could be opened");
++  }
++
++  m_next_scan = Common::Timer::GetCurrentValue() + static_cast<u64>(Common::Timer::ConvertSecondsToValue(1.0));
++  return true;
++}
++
++void PS4InputSource::UpdateSettings(SettingsInterface& si, std::unique_lock<std::mutex>& settings_lock)
++{
++}
++
++void PS4InputSource::Shutdown()
++{
++  for (ControllerData& cd : m_controllers)
++  {
++    if (cd.handle >= 0)
++    {
++      OrbisPadVibeParam vibe = {};
++      scePadSetVibration(cd.handle, &vibe);
++      scePadClose(cd.handle);
++    }
++    cd = {};
++  }
++}
++
++bool PS4InputSource::ReloadDevices()
++{
++  ScanUsers();
++  return true;
++}
++
++void PS4InputSource::ReleaseAll(u32 slot)
++{
++  ControllerData& cd = m_controllers[slot];
++  for (u32 i = 0; i < NUM_AXIS; i++)
++  {
++    if (cd.axes[i] != 0.0f)
++    {
++      cd.axes[i] = 0.0f;
++      InputManager::InvokeEvents(MakeGenericControllerAxisKey(InputSourceType::PS4, slot, i), 0.0f,
++                                 GenericInputBinding::Unknown);
++    }
++  }
++
++  u32 held = cd.buttons;
++  cd.buttons = 0;
++  for (u32 i = 0; i < NUM_BUTTONS; i++)
++  {
++    if (held & s_buttons[i].mask)
++      InputManager::InvokeEvents(MakeGenericControllerButtonKey(InputSourceType::PS4, slot, i), 0.0f,
++                                 s_buttons[i].generic);
++  }
++}
++
++void PS4InputSource::UpdateState(u32 slot)
++{
++  ControllerData& cd = m_controllers[slot];
++  OrbisPadData data = {};
++  const bool read = (scePadReadState(cd.handle, &data) == 0);
++  const bool connected = read && data.connected;
++  const TinyString ident = TinyString::from_format("P{}", slot);
++
++  if (connected != cd.connected)
++  {
++    cd.connected = connected;
++    if (connected)
++    {
++      Host::OnInputDeviceConnected(ident.view(), "DualShock 4");
++    }
++    else
++    {
++      ReleaseAll(slot);
++      Host::OnInputDeviceDisconnected(ident.view());
++    }
++  }
++
++  if (!connected || (data.buttons & PAD_INTERCEPTED))
++  {
++    ReleaseAll(slot);
++    return;
++  }
++
++  u32 buttons = data.buttons & ~(TOUCH_LEFT | TOUCH_RIGHT);
++  if ((buttons & ORBIS_PAD_BUTTON_TOUCH_PAD) && data.touch.fingers > 0)
++    buttons |= (data.touch.touch[0].x < 960) ? TOUCH_LEFT : TOUCH_RIGHT;
++
++  const float axes[NUM_AXIS] = {StickValue(data.leftStick.x), StickValue(data.leftStick.y),
++                                StickValue(data.rightStick.x), StickValue(data.rightStick.y)};
++  for (u32 i = 0; i < NUM_AXIS; i++)
++  {
++    if (axes[i] != cd.axes[i])
++    {
++      cd.axes[i] = axes[i];
++      InputManager::InvokeEvents(MakeGenericControllerAxisKey(InputSourceType::PS4, slot, i), axes[i],
++                                 GenericInputBinding::Unknown);
++    }
++  }
++
++  const u32 changed = buttons ^ cd.buttons;
++  cd.buttons = buttons;
++  if (changed == 0)
++    return;
++
++  for (u32 i = 0; i < NUM_BUTTONS; i++)
++  {
++    if (changed & s_buttons[i].mask)
++    {
++      InputManager::InvokeEvents(MakeGenericControllerButtonKey(InputSourceType::PS4, slot, i),
++                                 (buttons & s_buttons[i].mask) ? 1.0f : 0.0f, s_buttons[i].generic);
++    }
++  }
++}
++
++void PS4InputSource::PollEvents()
++{
++  const u64 now = Common::Timer::GetCurrentValue();
++  if (now >= m_next_scan)
++  {
++    m_next_scan = now + static_cast<u64>(Common::Timer::ConvertSecondsToValue(1.0));
++    ScanUsers();
++  }
++
++  for (u32 i = 0; i < NUM_CONTROLLERS; i++)
++  {
++    if (m_controllers[i].handle >= 0)
++      UpdateState(i);
++  }
++}
++
++std::vector<std::pair<std::string, std::string>> PS4InputSource::EnumerateDevices()
++{
++  std::vector<std::pair<std::string, std::string>> result;
++  for (u32 i = 0; i < NUM_CONTROLLERS; i++)
++  {
++    if (m_controllers[i].handle >= 0)
++      result.emplace_back(fmt::format("P{}", i), fmt::format("DualShock 4 ({})", i + 1));
++  }
++  return result;
++}
++
++std::vector<InputBindingKey> PS4InputSource::EnumerateMotors()
++{
++  std::vector<InputBindingKey> ret;
++  InputBindingKey key = {};
++  key.source_type = InputSourceType::PS4;
++  key.source_subtype = InputSubclass::ControllerMotor;
++  for (u32 i = 0; i < NUM_CONTROLLERS; i++)
++  {
++    if (m_controllers[i].handle < 0)
++      continue;
++    key.source_index = i;
++    key.data = 0;
++    ret.push_back(key);
++    key.data = 1;
++    ret.push_back(key);
++  }
++  return ret;
++}
++
++bool PS4InputSource::GetGenericBindingMapping(const std::string_view& device, GenericInputBindingMapping* mapping)
++{
++  if (device.size() != 2 || device[0] != 'P')
++    return false;
++
++  for (u32 i = 0; i < NUM_AXIS; i++)
++  {
++    mapping->emplace_back(s_generic_axis[i][0], fmt::format("{}/-{}", device, s_axis_names[i]));
++    mapping->emplace_back(s_generic_axis[i][1], fmt::format("{}/+{}", device, s_axis_names[i]));
++  }
++  for (u32 i = 0; i < NUM_BUTTONS; i++)
++  {
++    if (s_buttons[i].generic != GenericInputBinding::Unknown)
++      mapping->emplace_back(s_buttons[i].generic, fmt::format("{}/{}", device, s_buttons[i].name));
++  }
++  mapping->emplace_back(GenericInputBinding::LargeMotor, fmt::format("{}/LargeMotor", device));
++  mapping->emplace_back(GenericInputBinding::SmallMotor, fmt::format("{}/SmallMotor", device));
++  return true;
++}
++
++void PS4InputSource::UpdateMotorState(InputBindingKey key, float intensity)
++{
++  if (key.source_index >= NUM_CONTROLLERS)
++    return;
++
++  ControllerData& cd = m_controllers[key.source_index];
++  if (cd.handle < 0)
++    return;
++
++  const u8 value = static_cast<u8>(std::clamp(intensity, 0.0f, 1.0f) * 255.0f);
++  if (key.data == 0)
++    cd.large_motor = value;
++  else
++    cd.small_motor = value;
++
++  OrbisPadVibeParam vibe = {};
++  vibe.lgMotor = cd.large_motor;
++  vibe.smMotor = cd.small_motor;
++  scePadSetVibration(cd.handle, &vibe);
++}
++
++void PS4InputSource::UpdateMotorState(InputBindingKey large_key, InputBindingKey small_key, float large_intensity,
++                                      float small_intensity)
++{
++  if (large_key.source_index != small_key.source_index || large_key.source_index >= NUM_CONTROLLERS)
++  {
++    UpdateMotorState(large_key, large_intensity);
++    UpdateMotorState(small_key, small_intensity);
++    return;
++  }
++
++  ControllerData& cd = m_controllers[large_key.source_index];
++  if (cd.handle < 0)
++    return;
++
++  cd.large_motor = static_cast<u8>(std::clamp(large_intensity, 0.0f, 1.0f) * 255.0f);
++  cd.small_motor = static_cast<u8>(std::clamp(small_intensity, 0.0f, 1.0f) * 255.0f);
++  OrbisPadVibeParam vibe = {};
++  vibe.lgMotor = cd.large_motor;
++  vibe.smMotor = cd.small_motor;
++  scePadSetVibration(cd.handle, &vibe);
++}
++
++std::optional<InputBindingKey> PS4InputSource::ParseKeyString(const std::string_view& device,
++                                                              const std::string_view& binding)
++{
++  if (device.size() != 2 || device[0] != 'P' || device[1] < '0' || device[1] >= ('0' + NUM_CONTROLLERS) ||
++      binding.empty())
++  {
++    return std::nullopt;
++  }
++
++  InputBindingKey key = {};
++  key.source_type = InputSourceType::PS4;
++  key.source_index = static_cast<u32>(device[1] - '0');
++
++  if (binding[0] == '+' || binding[0] == '-')
++  {
++    const std::string_view axis = binding.substr(1);
++    for (u32 i = 0; i < NUM_AXIS; i++)
++    {
++      if (axis == s_axis_names[i])
++      {
++        key.source_subtype = InputSubclass::ControllerAxis;
++        key.modifier = (binding[0] == '-') ? InputModifier::Negate : InputModifier::None;
++        key.data = i;
++        return key;
++      }
++    }
++    return std::nullopt;
++  }
++
++  if (binding == "LargeMotor" || binding == "SmallMotor")
++  {
++    key.source_subtype = InputSubclass::ControllerMotor;
++    key.data = (binding == "LargeMotor") ? 0 : 1;
++    return key;
++  }
++
++  for (u32 i = 0; i < NUM_BUTTONS; i++)
++  {
++    if (binding == s_buttons[i].name)
++    {
++      key.source_subtype = InputSubclass::ControllerButton;
++      key.data = i;
++      return key;
++    }
++  }
++
++  return std::nullopt;
++}
++
++TinyString PS4InputSource::ConvertKeyToString(InputBindingKey key)
++{
++  TinyString ret;
++  if (key.source_type != InputSourceType::PS4)
++    return ret;
++
++  if (key.source_subtype == InputSubclass::ControllerAxis && key.data < NUM_AXIS)
++  {
++    ret.format("P{}/{}{}", static_cast<u32>(key.source_index), (key.modifier == InputModifier::Negate) ? '-' : '+',
++               s_axis_names[key.data]);
++  }
++  else if (key.source_subtype == InputSubclass::ControllerButton && key.data < NUM_BUTTONS)
++  {
++    ret.format("P{}/{}", static_cast<u32>(key.source_index), s_buttons[key.data].name);
++  }
++  else if (key.source_subtype == InputSubclass::ControllerMotor)
++  {
++    ret.format("P{}/{}Motor", static_cast<u32>(key.source_index), key.data ? "Small" : "Large");
++  }
++
++  return ret;
++}
++
++TinyString PS4InputSource::ConvertKeyToIcon(InputBindingKey key)
++{
++  return {};
++}
++
++std::unique_ptr<InputSource> InputSource::CreatePS4Source()
++{
++  return std::make_unique<PS4InputSource>();
++}
+diff --git a/src/util/ps4_input_source.h b/src/util/ps4_input_source.h
+new file mode 100644
+index 00000000..0472a64f
+--- /dev/null
++++ b/src/util/ps4_input_source.h
+@@ -0,0 +1,61 @@
++#pragma once
++
++#include "input_source.h"
++
++#include <array>
++#include <mutex>
++#include <vector>
++
++class SettingsInterface;
++
++class PS4InputSource final : public InputSource
++{
++public:
++  PS4InputSource();
++  ~PS4InputSource();
++
++  bool Initialize(SettingsInterface& si, std::unique_lock<std::mutex>& settings_lock) override;
++  void UpdateSettings(SettingsInterface& si, std::unique_lock<std::mutex>& settings_lock) override;
++  void Shutdown() override;
++  bool ReloadDevices() override;
++
++  void PollEvents() override;
++  std::vector<std::pair<std::string, std::string>> EnumerateDevices() override;
++  std::vector<InputBindingKey> EnumerateMotors() override;
++  bool GetGenericBindingMapping(const std::string_view& device, GenericInputBindingMapping* mapping) override;
++  void UpdateMotorState(InputBindingKey key, float intensity) override;
++  void UpdateMotorState(InputBindingKey large_key, InputBindingKey small_key, float large_intensity,
++                        float small_intensity) override;
++
++  std::optional<InputBindingKey> ParseKeyString(const std::string_view& device,
++                                                const std::string_view& binding) override;
++  TinyString ConvertKeyToString(InputBindingKey key) override;
++  TinyString ConvertKeyToIcon(InputBindingKey key) override;
++
++  enum : u32
++  {
++    NUM_CONTROLLERS = 4,
++    NUM_BUTTONS = 18,
++    NUM_AXIS = 4,
++  };
++
++private:
++  struct ControllerData
++  {
++    s32 handle = -1;
++    s32 user = -1;
++    bool connected = false;
++    u32 buttons = 0;
++    std::array<float, NUM_AXIS> axes = {};
++    u8 large_motor = 0;
++    u8 small_motor = 0;
++  };
++
++  bool OpenPad(s32 user, u32 slot, int attempts);
++  void ScanUsers();
++  void ReleaseAll(u32 slot);
++  void UpdateState(u32 slot);
++
++  std::array<ControllerData, NUM_CONTROLLERS> m_controllers;
++  u64 m_next_scan = 0;
++};
+diff --git a/src/util/shadergen.cpp b/src/util/shadergen.cpp
+index 404f5dfa..14431936 100644
+--- a/src/util/shadergen.cpp
++++ b/src/util/shadergen.cpp
+@@ -606,7 +606,8 @@ void ShaderGen::DeclareFragmentEntryPoint(
+ #ifdef ENABLE_VULKAN
+       if (m_render_api == RenderAPI::Vulkan)
+       {
+-        ss << "layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput u_input_rt;\n";
++        ss << "layout(input_attachment_index = 0, set = " << (m_has_uniform_buffer ? 2 : 1)
++           << ", binding = 0) uniform subpassInput u_input_rt;\n";
+         ss << "#define LAST_FRAG_COLOR subpassLoad(u_input_rt)\n";
+       }
+ #endif
+diff --git a/src/util/vulkan_device.cpp b/src/util/vulkan_device.cpp
+index aedf3c41..881f65cb 100644
+--- a/src/util/vulkan_device.cpp
++++ b/src/util/vulkan_device.cpp
+@@ -4,6 +4,9 @@
+ #include "vulkan_device.h"
+ #include "vulkan_builders.h"
+ #include "vulkan_pipeline.h"
++#ifdef __PS4__
++#include "common/ps4_host.h"
++#endif
+ #include "vulkan_stream_buffer.h"
+ #include "vulkan_swap_chain.h"
+ #include "vulkan_texture.h"
+@@ -257,6 +260,10 @@ bool VulkanDevice::SelectInstanceExtensions(ExtensionList* extension_list, const
+   if (wi.type == WindowInfo::Type::MacOS && !SupportsExtension(VK_EXT_METAL_SURFACE_EXTENSION_NAME, true))
+     return false;
+ #endif
++#if defined(__PS4__)
++  if (wi.type == WindowInfo::Type::PS4 && !SupportsExtension(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, true))
++    return false;
++#endif
+ #if defined(VK_USE_PLATFORM_ANDROID_KHR)
+   if (wi.type == WindowInfo::Type::Android && !SupportsExtension(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, true))
+     return false;
+@@ -2433,6 +2440,13 @@ void VulkanDevice::EndPresent(bool explicit_present)
+   MoveToNextCommandBuffer();
+   InvalidateCachedState();
+   TrimTexturePool();
++
++#ifdef __PS4__
++  ps4_host_frame();
++  static u32 s_ps4_presents = 0;
++  if (++s_ps4_presents % 1800 == 0)
++    PS4SavePipelineCache();
++#endif
+ }
+ 
+ void VulkanDevice::SubmitPresent()
+@@ -2822,8 +2836,12 @@ void VulkanDevice::PushUniformBuffer(const void* data, u32 data_size)
+ {
+   DebugAssert(data_size < UNIFORM_PUSH_CONSTANTS_SIZE);
+   s_stats.buffer_streamed += data_size;
+-  vkCmdPushConstants(GetCurrentCommandBuffer(), GetCurrentVkPipelineLayout(), UNIFORM_PUSH_CONSTANTS_STAGES, 0,
+-                     data_size, data);
++  const VkPipelineLayout push_layout =
++    (m_current_pipeline_layout == GPUPipeline::Layout::SingleTextureAndUBO ||
++     m_current_pipeline_layout == GPUPipeline::Layout::MultiTextureAndUBO) ?
++      m_pipeline_layouts[static_cast<u8>(GPUPipeline::Layout::SingleTextureAndPushConstants)] :
++      GetCurrentVkPipelineLayout();
++  vkCmdPushConstants(GetCurrentCommandBuffer(), push_layout, UNIFORM_PUSH_CONSTANTS_STAGES, 0, data_size, data);
+ }
+ 
+ void* VulkanDevice::MapUniformBuffer(u32 size)
+diff --git a/src/util/vulkan_entry_points.inl b/src/util/vulkan_entry_points.inl
+index 10b26269..99068157 100644
+--- a/src/util/vulkan_entry_points.inl
++++ b/src/util/vulkan_entry_points.inl
+@@ -60,6 +60,10 @@ VULKAN_INSTANCE_ENTRY_POINT(vkCreateMetalSurfaceEXT, false)
+ VULKAN_INSTANCE_ENTRY_POINT(vkCreateAndroidSurfaceKHR, false)
+ #endif
+ 
++#if defined(__PS4__)
++VULKAN_INSTANCE_ENTRY_POINT(vkCreateHeadlessSurfaceEXT, false)
++#endif
++
+ // VK_EXT_debug_utils
+ VULKAN_INSTANCE_ENTRY_POINT(vkCmdBeginDebugUtilsLabelEXT, false)
+ VULKAN_INSTANCE_ENTRY_POINT(vkCmdEndDebugUtilsLabelEXT, false)
+diff --git a/src/util/vulkan_loader.cpp b/src/util/vulkan_loader.cpp
+index 065607dc..e18fc5f7 100644
+--- a/src/util/vulkan_loader.cpp
++++ b/src/util/vulkan_loader.cpp
+@@ -100,6 +100,55 @@ void Vulkan::UnloadVulkanLibrary()
+   s_vulkan_module = nullptr;
+ }
+ 
++#elif defined(__PS4__)
++
++extern PFN_vkGetInstanceProcAddr ps4_vk_get_instance_proc_addr();
++
++static bool s_vulkan_loaded = false;
++
++bool Vulkan::IsVulkanLibraryLoaded()
++{
++  return s_vulkan_loaded;
++}
++
++bool Vulkan::LoadVulkanLibrary()
++{
++  vkGetInstanceProcAddr = ps4_vk_get_instance_proc_addr();
++  if (!vkGetInstanceProcAddr)
++    return false;
++
++  bool required_functions_missing = false;
++  auto LoadFunction = [&](void** func_ptr, const char* name, bool is_required) {
++    if (*func_ptr)
++      return;
++    *func_ptr = reinterpret_cast<void*>(vkGetInstanceProcAddr(VK_NULL_HANDLE, name));
++    if (!(*func_ptr) && is_required && std::strcmp(name, "vkDestroyInstance") != 0)
++    {
++      Log_ErrorPrintf("Vulkan: Failed to load required module function %s", name);
++      required_functions_missing = true;
++    }
++  };
++
++#define VULKAN_MODULE_ENTRY_POINT(name, required) LoadFunction(reinterpret_cast<void**>(&name), #name, required);
++#include "vulkan_entry_points.inl"
++#undef VULKAN_MODULE_ENTRY_POINT
++
++  if (required_functions_missing)
++  {
++    ResetVulkanLibraryFunctionPointers();
++    return false;
++  }
++
++  s_vulkan_loaded = true;
++  return true;
++}
++
++void Vulkan::UnloadVulkanLibrary()
++{
++  ResetVulkanLibraryFunctionPointers();
++  s_vulkan_loaded = false;
++}
++
+ #else
+ 
+ static void* s_vulkan_module;
+@@ -208,6 +257,10 @@ bool Vulkan::LoadVulkanInstanceFunctions(VkInstance instance)
+ #include "vulkan_entry_points.inl"
+ #undef VULKAN_INSTANCE_ENTRY_POINT
+ 
++#ifdef __PS4__
++  vkDestroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(vkGetInstanceProcAddr(instance, "vkDestroyInstance"));
++#endif
++
+   return !required_functions_missing;
+ }
+ 
+diff --git a/src/util/vulkan_pipeline.cpp b/src/util/vulkan_pipeline.cpp
+index a0a68d3c..1a120307 100644
+--- a/src/util/vulkan_pipeline.cpp
++++ b/src/util/vulkan_pipeline.cpp
+@@ -8,11 +8,17 @@
+ #include "common/assert.h"
+ #include "common/log.h"
+ 
++#ifdef __PS4__
++#include "ps4_glslang.h"
++#else
+ #include "shaderc/shaderc.hpp"
++#endif
+ 
+ Log_SetChannel(VulkanDevice);
+ 
++#ifndef __PS4__
+ static std::unique_ptr<shaderc::Compiler> s_shaderc_compiler;
++#endif
+ 
+ VulkanShader::VulkanShader(GPUShaderStage stage, VkShaderModule mod) : GPUShader(stage), m_module(mod)
+ {
+@@ -48,6 +54,25 @@ std::unique_ptr<GPUShader> VulkanDevice::CreateShaderFromSource(GPUShaderStage s
+                                                                 const char* entry_point,
+                                                                 DynamicHeapArray<u8>* out_binary)
+ {
++#ifdef __PS4__
++  std::vector<u32> spirv;
++  std::string errors;
++  if (!PS4GLSLToSPIRV(static_cast<u32>(stage), source, entry_point, &spirv, &errors))
++  {
++    DumpBadShader(source, errors);
++    Log_ErrorFmt("Failed to compile shader to SPIR-V:\n{}", errors);
++    return {};
++  }
++
++  const size_t spirv_size = spirv.size() * sizeof(u32);
++  if (out_binary)
++  {
++    out_binary->resize(spirv_size);
++    std::memcpy(out_binary->data(), spirv.data(), spirv_size);
++  }
++
++  return CreateShaderFromBinary(stage, std::span<const u8>(reinterpret_cast<const u8*>(spirv.data()), spirv_size));
++#else
+   static constexpr const std::array<shaderc_shader_kind, static_cast<size_t>(GPUShaderStage::MaxCount)> stage_kinds = {{
+     shaderc_glsl_vertex_shader,
+     shaderc_glsl_fragment_shader,
+@@ -99,6 +124,7 @@ std::unique_ptr<GPUShader> VulkanDevice::CreateShaderFromSource(GPUShaderStage s
+   }
+ 
+   return CreateShaderFromBinary(stage, std::span<const u8>(reinterpret_cast<const u8*>(result.cbegin()), spirv_size));
++#endif
+ }
+ 
+ //////////////////////////////////////////////////////////////////////////
+diff --git a/src/util/vulkan_swap_chain.cpp b/src/util/vulkan_swap_chain.cpp
+index daf9a46f..a07d3b10 100644
+--- a/src/util/vulkan_swap_chain.cpp
++++ b/src/util/vulkan_swap_chain.cpp
+@@ -86,6 +86,23 @@ VulkanSwapChain::~VulkanSwapChain()
+ 
+ VkSurfaceKHR VulkanSwapChain::CreateVulkanSurface(VkInstance instance, VkPhysicalDevice physical_device, WindowInfo* wi)
+ {
++#if defined(__PS4__)
++  if (wi->type == WindowInfo::Type::PS4)
++  {
++    const VkHeadlessSurfaceCreateInfoEXT surface_create_info = {VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT,
++                                                                nullptr, 0};
++    VkSurfaceKHR surface;
++    VkResult res = vkCreateHeadlessSurfaceEXT(instance, &surface_create_info, nullptr, &surface);
++    if (res != VK_SUCCESS)
++    {
++      LOG_VULKAN_ERROR(res, "vkCreateHeadlessSurfaceEXT failed: ");
++      return VK_NULL_HANDLE;
++    }
++
++    return surface;
++  }
++#endif
++
+ #if defined(VK_USE_PLATFORM_WIN32_KHR)
+   if (wi->type == WindowInfo::Type::Win32)
+   {
+diff --git a/src/util/window_info.cpp b/src/util/window_info.cpp
+index 966b9c68..a006845c 100644
+--- a/src/util/window_info.cpp
++++ b/src/util/window_info.cpp
+@@ -229,7 +229,7 @@ bool WindowInfo::QueryRefreshRateForWindow(const WindowInfo& wi, float* refresh_
+     return GetRefreshRateFromXRandR(wi, refresh_rate);
+ #endif
+ 
+-#ifdef __SWITCH__
++#if defined(__SWITCH__) || defined(__PS4__)
+   *refresh_rate = 60.f;
+   return true;
+ #endif
+diff --git a/src/util/window_info.h b/src/util/window_info.h
+index 459a5f61..7e24424b 100644
+--- a/src/util/window_info.h
++++ b/src/util/window_info.h
+@@ -17,7 +17,8 @@ struct WindowInfo
+     MacOS,
+     Android,
+     Display,
+-    Switch
++    Switch,
++    PS4
+   };
+ 
+   Type type = Type::Surfaceless;
