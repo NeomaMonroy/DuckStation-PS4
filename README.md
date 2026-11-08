@@ -58,8 +58,8 @@ GitHub builds the package for you. Nothing is installed on your PC.
    Later builds reuse the toolchain and are much faster.
 4. Open the finished run and download **DuckStation-PS4-pkg** under **Artifacts**. It's a ZIP with the `.pkg` inside.
 
-To publish a release, push a tag such as `v00.04`. The package for that tag is attached to a new release
-automatically, as `DuckStation-v00.04.pkg`.
+To publish a release, type a version such as `00.04` in the **Version** box before clicking the green
+**Run workflow** button. The package is attached to a new release automatically, as `DuckStation-v00.04.pkg`.
 
 To build from your own copy, click **Fork** at the top of this page first, then run the steps above on your fork.
 
