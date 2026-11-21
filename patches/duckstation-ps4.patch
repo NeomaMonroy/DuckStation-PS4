@@ -412,11 +412,16 @@ index 6d08f790..9080ef00 100644
      {
        const Value current_time = GetCurrentValue();
 diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
-index 5c2edd60..a009cf15 100644
+index 5c2edd60..7cf34c0c 100644
 --- a/src/core/CMakeLists.txt
 +++ b/src/core/CMakeLists.txt
-@@ -136,7 +136,10 @@ target_link_libraries(core PUBLIC Threads::Threads common util ZLIB::ZLIB)
+@@ -134,9 +134,15 @@ target_include_directories(core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+ target_include_directories(core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+ target_link_libraries(core PUBLIC Threads::Threads common util ZLIB::ZLIB)
  target_link_libraries(core PRIVATE xxhash imgui rapidyaml rcheevos)
++if(PS4)
++  target_sources(core PRIVATE ps4_cover_download.cpp ps4_cover_download.h)
++endif()
  
  if(CPU_ARCH_X64)
 -  target_compile_definitions(core PUBLIC "ENABLE_RECOMPILER=1" "ENABLE_NEWREC=1" "ENABLE_MMAP_FASTMEM=1")
@@ -427,7 +432,7 @@ index 5c2edd60..a009cf15 100644
    target_sources(core PRIVATE ${RECOMPILER_SRCS} ${NEWREC_SOURCES}
      cpu_recompiler_code_generator_x64.cpp
      cpu_newrec_compiler_x64.cpp
-@@ -178,7 +181,7 @@ if(CPU_ARCH_RISCV64)
+@@ -178,7 +184,7 @@ if(CPU_ARCH_RISCV64)
    message(STATUS "Building RISC-V 64-bit recompiler.")
  endif()
  
@@ -436,7 +441,7 @@ index 5c2edd60..a009cf15 100644
    target_compile_definitions(core PUBLIC -DENABLE_DISCORD_PRESENCE=1)
    target_link_libraries(core PRIVATE discord-rpc)
  endif()
-@@ -190,6 +193,10 @@ function(add_resources target path basedir)
+@@ -190,6 +196,10 @@ function(add_resources target path basedir)
  	if(APPLE)
  		target_sources(${target} PRIVATE ${path})
  		set_source_files_properties(${path} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/${subdir})
@@ -548,10 +553,26 @@ index 4c495589..c80fda09 100644
    u8* ptr = static_cast<u8*>(code);
    *(ptr++) = 0xE9; // jmp
 diff --git a/src/core/fullscreen_ui.cpp b/src/core/fullscreen_ui.cpp
-index fb8db1fa..d30c50c9 100644
+index fb8db1fa..71589ce7 100644
 --- a/src/core/fullscreen_ui.cpp
 +++ b/src/core/fullscreen_ui.cpp
-@@ -1500,7 +1500,7 @@ void FullscreenUI::DrawExitWindow()
+@@ -246,6 +246,7 @@ enum class GameListView
+ {
+   Grid,
+   List,
++  Carousel,
+   Count
+ };
+ 
+@@ -499,6 +500,7 @@ static bool s_save_state_selector_resuming = false;
+ static void DrawGameListWindow();
+ static void DrawGameList(const ImVec2& heading_size);
+ static void DrawGameGrid(const ImVec2& heading_size);
++static void DrawGameCarousel(const ImVec2& heading_size);
+ static void HandleGameListActivate(const GameList::Entry* entry);
+ static void HandleGameListOptions(const GameList::Entry* entry);
+ static void DrawGameListSettingsWindow();
+@@ -1500,7 +1502,7 @@ void FullscreenUI::DrawExitWindow()
  
    ImGui::PushStyleColor(ImGuiCol_Text, UIBackgroundTextColor);
  
@@ -560,7 +581,7 @@ index fb8db1fa..d30c50c9 100644
    constexpr int NumMenuItems = 2;
  #else
    constexpr int NumMenuItems = 3;
-@@ -1525,7 +1525,7 @@ void FullscreenUI::DrawExitWindow()
+@@ -1525,7 +1527,7 @@ void FullscreenUI::DrawExitWindow()
        DoRequestExit();
      }
  
@@ -569,6 +590,298 @@ index fb8db1fa..d30c50c9 100644
      if (HorizontalMenuItem(GetCachedTexture("fullscreenui/desktop-mode.png"), FSUI_CSTR("Desktop Mode"),
                             FSUI_CSTR("Exits Big Picture mode, returning to the desktop interface.")))
      {
+@@ -6144,8 +6146,9 @@ void FullscreenUI::DrawGameListWindow()
+   if (BeginFullscreenWindow(ImVec2(0.0f, 0.0f), heading_size, "gamelist_view", MulAlpha(UIPrimaryColor, bg_alpha)))
+   {
+     static constexpr float ITEM_WIDTH = 25.0f;
+-    static constexpr const char* icons[] = {ICON_FA_BORDER_ALL, ICON_FA_LIST};
+-    static constexpr const char* titles[] = {FSUI_NSTR("Game Grid"), FSUI_NSTR("Game List")};
++    static constexpr const char* icons[] = {ICON_FA_BORDER_ALL, ICON_FA_LIST, ICON_FA_TV};
++    static constexpr const char* titles[] = {FSUI_NSTR("Game Grid"), FSUI_NSTR("Game List"),
++                                             FSUI_NSTR("Game Carousel")};
+     static constexpr u32 count = static_cast<u32>(std::size(titles));
+ 
+     BeginNavBar();
+@@ -6172,7 +6175,8 @@ void FullscreenUI::DrawGameListWindow()
+ 
+   if (ImGui::IsKeyPressed(ImGuiKey_NavGamepadInput, false) || ImGui::IsKeyPressed(ImGuiKey_F1, false))
+   {
+-    s_game_list_view = (s_game_list_view == GameListView::Grid) ? GameListView::List : GameListView::Grid;
++    s_game_list_view =
++      static_cast<GameListView>((static_cast<u32>(s_game_list_view) + 1) % static_cast<u32>(GameListView::Count));
+   }
+   else if (ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false) || ImGui::IsKeyPressed(ImGuiKey_F2))
+   {
+@@ -6188,6 +6192,9 @@ void FullscreenUI::DrawGameListWindow()
+     case GameListView::List:
+       DrawGameList(heading_size);
+       break;
++    case GameListView::Carousel:
++      DrawGameCarousel(heading_size);
++      break;
+     default:
+       break;
+   }
+@@ -6534,6 +6541,224 @@ void FullscreenUI::DrawGameGrid(const ImVec2& heading_size)
+   EndFullscreenWindow();
+ }
+ 
++void FullscreenUI::DrawGameCarousel(const ImVec2& heading_size)
++{
++  static s32 s_index = 0;
++  static float s_scroll = 0.0f;
++  static double s_last_time = 0.0;
++
++  ImGuiIO& io = ImGui::GetIO();
++  const ImVec2 window_pos(0.0f, heading_size.y);
++  const ImVec2 window_size(io.DisplaySize.x, io.DisplaySize.y - heading_size.y - LayoutScale(LAYOUT_FOOTER_HEIGHT));
++  if (!BeginFullscreenWindow(window_pos, window_size, "game_carousel", UIBackgroundColor))
++  {
++    EndFullscreenWindow();
++    return;
++  }
++
++  ResetFocusHere();
++  const bool focused = ImGui::IsWindowFocused();
++  if (focused && WantsToCloseMenu())
++    ReturnToPreviousWindow();
++
++  const s32 count = static_cast<s32>(s_game_list_sorted_entries.size());
++  ImDrawList* dl = ImGui::GetWindowDrawList();
++  const ImVec2 wmin = ImGui::GetWindowPos();
++  const ImVec2 wmax = wmin + ImGui::GetWindowSize();
++  const float ww = wmax.x - wmin.x;
++  const float wh = wmax.y - wmin.y;
++
++  if (count == 0)
++  {
++    ImGui::PushFont(g_large_font);
++    const char* text = FSUI_CSTR("No games found.");
++    const ImVec2 ts = g_large_font->CalcTextSizeA(g_large_font->FontSize, FLT_MAX, 0.0f, text);
++    dl->AddText(g_large_font, g_large_font->FontSize, ImVec2(wmin.x + (ww - ts.x) * 0.5f, wmin.y + (wh - ts.y) * 0.5f),
++                ImGui::GetColorU32(UIPrimaryTextColor), text);
++    ImGui::PopFont();
++    EndFullscreenWindow();
++    return;
++  }
++
++  s_index = std::clamp(s_index, 0, count - 1);
++  if (focused)
++  {
++    s32 move = 0;
++    if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, true) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickLeft, true) ||
++        ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
++      move = -1;
++    else if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, true) ||
++             ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight, true) || ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
++      move = 1;
++    else if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, true) || ImGui::IsKeyPressed(ImGuiKey_PageUp, true))
++      move = -5;
++    else if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, true) || ImGui::IsKeyPressed(ImGuiKey_PageDown, true))
++      move = 5;
++    else if (ImGui::IsKeyPressed(ImGuiKey_Home, false))
++      move = -count;
++    else if (ImGui::IsKeyPressed(ImGuiKey_End, false))
++      move = count;
++    s_index = std::clamp(s_index + move, 0, count - 1);
++
++    const GameList::Entry* selected = s_game_list_sorted_entries[s_index];
++    if (ImGui::IsKeyPressed(ImGuiKey_NavGamepadActivate, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false))
++      HandleGameListActivate(selected);
++    else if (ImGui::IsKeyPressed(ImGuiKey_NavGamepadMenu, false) || ImGui::IsKeyPressed(ImGuiKey_F3, false))
++      HandleGameListOptions(selected);
++  }
++
++  const double now = ImGui::GetTime();
++  const float dt = (s_last_time > 0.0) ? static_cast<float>(std::min(now - s_last_time, 0.1)) : 1.0f;
++  s_last_time = now;
++  s_scroll += (static_cast<float>(s_index) - s_scroll) * std::min(1.0f, dt * 12.0f);
++  if (std::abs(static_cast<float>(s_index) - s_scroll) < 0.001f)
++    s_scroll = static_cast<float>(s_index);
++
++  const GameList::Entry* current = s_game_list_sorted_entries[s_index];
++
++  GPUTexture* const bg_tex = GetGameListCover(current);
++  if (bg_tex)
++  {
++    const float tw = static_cast<float>(bg_tex->GetWidth());
++    const float th = static_cast<float>(bg_tex->GetHeight());
++    const float scale = std::max(ww / tw, wh / th) * 1.15f;
++    const ImVec2 bsize(tw * scale, th * scale);
++    const ImVec2 bpos(wmin.x + (ww - bsize.x) * 0.5f, wmin.y + (wh - bsize.y) * 0.5f);
++    dl->AddImage(bg_tex, bpos, bpos + bsize, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32(255, 255, 255, 46));
++  }
++  const ImU32 bg_solid = ImGui::GetColorU32(UIBackgroundColor);
++  const ImU32 bg_clear = ImGui::GetColorU32(ImVec4(UIBackgroundColor.x, UIBackgroundColor.y, UIBackgroundColor.z, 0.0f));
++  dl->AddRectFilledMultiColor(wmin, ImVec2(wmax.x, wmin.y + wh * 0.25f), bg_solid, bg_solid, bg_clear, bg_clear);
++  dl->AddRectFilledMultiColor(ImVec2(wmin.x, wmin.y + wh * 0.55f), wmax, bg_clear, bg_clear, bg_solid, bg_solid);
++
++  const float box = std::min(wh * 0.50f, ww * 0.30f);
++  const float center_x = wmin.x + ww * 0.5f;
++  const float base_y = wmin.y + wh * 0.08f + box;
++  const float spacing = box * 0.78f;
++  const float pulse = 0.55f + 0.45f * static_cast<float>(std::sin(now * 3.0));
++
++  struct Slot
++  {
++    s32 index;
++    float dist;
++  };
++  std::vector<Slot> slots;
++  const s32 first = std::max(0, static_cast<s32>(std::floor(s_scroll)) - 5);
++  const s32 last = std::min(count - 1, static_cast<s32>(std::ceil(s_scroll)) + 5);
++  for (s32 i = first; i <= last; i++)
++    slots.push_back({i, static_cast<float>(i) - s_scroll});
++  std::sort(slots.begin(), slots.end(),
++            [](const Slot& a, const Slot& b) { return std::abs(a.dist) > std::abs(b.dist); });
++
++  for (const Slot& slot : slots)
++  {
++    const float ad = std::abs(slot.dist);
++    const float scale = 1.0f - std::min(ad, 3.0f) * 0.17f;
++    const float alpha = std::clamp(1.0f - ad * 0.22f, 0.0f, 1.0f);
++    const float side = (slot.dist < 0.0f) ? -1.0f : 1.0f;
++    const float offset = (ad <= 1.0f) ? slot.dist * spacing : side * (spacing + (ad - 1.0f) * spacing * 0.62f);
++    const float size = box * scale;
++    const ImVec2 cmin(center_x + offset - size * 0.5f, base_y - size);
++    const ImVec2 cmax(cmin.x + size, base_y);
++    if (cmax.x < wmin.x || cmin.x > wmax.x)
++      continue;
++
++    GPUTexture* const tex = GetGameListCover(s_game_list_sorted_entries[slot.index]);
++    if (!tex)
++      continue;
++    const ImRect img = CenterImage(ImRect(cmin, cmax), ImVec2(static_cast<float>(tex->GetWidth()),
++                                                              static_cast<float>(tex->GetHeight())));
++    const ImRect fitted(ImVec2(img.Min.x, cmax.y - img.GetHeight()), ImVec2(img.Max.x, cmax.y));
++    const u8 a8 = static_cast<u8>(alpha * 255.0f);
++    const float rounding = LayoutScale(6.0f);
++
++    const float shadow = LayoutScale(14.0f) * scale;
++    dl->AddRectFilled(fitted.Min + ImVec2(shadow * 0.4f, shadow), fitted.Max + ImVec2(shadow * 0.4f, shadow),
++                      IM_COL32(0, 0, 0, static_cast<u8>(110 * alpha)), rounding);
++
++    const float refl_h = fitted.GetHeight() * 0.35f;
++    const ImVec2 rmin(fitted.Min.x, fitted.Max.y + LayoutScale(4.0f));
++    const ImVec2 rmax(fitted.Max.x, rmin.y + refl_h);
++    dl->AddImage(tex, rmin, rmax, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.65f),
++                 IM_COL32(255, 255, 255, static_cast<u8>(70 * alpha)));
++    dl->AddRectFilledMultiColor(rmin, rmax, bg_clear, bg_clear, bg_solid, bg_solid);
++
++    dl->AddImageRounded(tex, fitted.Min, fitted.Max, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
++                        IM_COL32(255, 255, 255, a8), rounding);
++    if (ad > 0.5f)
++      dl->AddRectFilled(fitted.Min, fitted.Max, IM_COL32(0, 0, 0, static_cast<u8>(std::min(ad, 3.0f) * 40.0f)),
++                        rounding);
++
++    if (slot.index == s_index && ad < 0.5f)
++    {
++      const ImVec4 glow = UIPrimaryColor;
++      for (int g = 3; g >= 1; g--)
++      {
++        const float grow = LayoutScale(3.0f) * static_cast<float>(g);
++        dl->AddRect(fitted.Min - ImVec2(grow, grow), fitted.Max + ImVec2(grow, grow),
++                    ImGui::GetColorU32(ImVec4(glow.x, glow.y, glow.z, pulse * 0.28f / static_cast<float>(g))),
++                    rounding + grow, 0, LayoutScale(3.0f));
++      }
++      dl->AddRect(fitted.Min, fitted.Max, ImGui::GetColorU32(ImVec4(glow.x, glow.y, glow.z, 0.6f + 0.4f * pulse)),
++                  rounding, 0, LayoutScale(3.0f));
++    }
++  }
++
++  const float text_y = base_y + box * 0.35f + LayoutScale(18.0f);
++  const ImU32 text_col = ImGui::GetColorU32(UIPrimaryTextColor);
++  const ImU32 dim_col = ImGui::GetColorU32(ImVec4(UIPrimaryTextColor.x, UIPrimaryTextColor.y, UIPrimaryTextColor.z, 0.65f));
++  auto centered_text = [&](ImFont* font, float y, std::string_view text, ImU32 col) {
++    const ImVec2 ts = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0f, text.data(), text.data() + text.size());
++    const float x = std::max(wmin.x + LayoutScale(20.0f), center_x - ts.x * 0.5f);
++    dl->AddText(font, font->FontSize, ImVec2(x + 2.0f, y + 2.0f), IM_COL32(0, 0, 0, 160), text.data(),
++                text.data() + text.size());
++    dl->AddText(font, font->FontSize, ImVec2(x, y), col, text.data(), text.data() + text.size());
++    return ts.y;
++  };
++
++  float y = text_y;
++  y += centered_text(g_large_font, y, current->title, text_col) + LayoutScale(6.0f);
++
++  SmallString info;
++  if (!current->serial.empty())
++    info.append(current->serial);
++  if (current->region != DiscRegion::Other && current->region != DiscRegion::NonPS1)
++    info.append_format("{}{}", info.empty() ? "" : "   \xe2\x80\xa2   ", Settings::GetDiscRegionDisplayName(current->region));
++  char date[64];
++  if (current->GetReleaseDateString(date, sizeof(date)) > 0)
++    info.append_format("{}{}", info.empty() ? "" : "   \xe2\x80\xa2   ", date);
++  if (!current->genre.empty())
++    info.append_format("{}{}", info.empty() ? "" : "   \xe2\x80\xa2   ", current->genre);
++  if (!info.empty())
++    y += centered_text(g_medium_font, y, info.view(), dim_col) + LayoutScale(4.0f);
++
++  if (current->total_played_time > 0)
++  {
++    const TinyString played = GameList::FormatTimespan(current->total_played_time, true);
++    centered_text(g_medium_font, y, SmallString::from_format(FSUI_FSTR("All Time: {}"), played.view()).view(),
++                  dim_col);
++  }
++
++  const SmallString counter = SmallString::from_format("{} / {}", s_index + 1, count);
++  const ImVec2 cs = g_medium_font->CalcTextSizeA(g_medium_font->FontSize, FLT_MAX, 0.0f, counter.c_str(), counter.end_ptr());
++  dl->AddText(g_medium_font, g_medium_font->FontSize,
++              ImVec2(wmax.x - cs.x - LayoutScale(24.0f), wmax.y - cs.y - LayoutScale(14.0f)), dim_col,
++              counter.c_str(), counter.end_ptr());
++
++  const float bar_w = ww * 0.40f;
++  const float bar_x = center_x - bar_w * 0.5f;
++  const float bar_y = wmax.y - LayoutScale(22.0f);
++  dl->AddRectFilled(ImVec2(bar_x, bar_y), ImVec2(bar_x + bar_w, bar_y + LayoutScale(4.0f)), IM_COL32(255, 255, 255, 40),
++                    LayoutScale(2.0f));
++  const float frac = (count > 1) ? (s_scroll / static_cast<float>(count - 1)) : 1.0f;
++  const float knob_w = std::max(bar_w / static_cast<float>(count), LayoutScale(24.0f));
++  const float knob_x = bar_x + (bar_w - knob_w) * frac;
++  dl->AddRectFilled(ImVec2(knob_x, bar_y), ImVec2(knob_x + knob_w, bar_y + LayoutScale(4.0f)),
++                    ImGui::GetColorU32(UIPrimaryColor), LayoutScale(2.0f));
++
++  EndFullscreenWindow();
++}
++
+ void FullscreenUI::HandleGameListActivate(const GameList::Entry* entry)
+ {
+   // launch game
+@@ -6723,7 +6948,8 @@ void FullscreenUI::DrawGameListSettingsWindow()
+ 
+   MenuHeading(FSUI_CSTR("List Settings"));
+   {
+-    static constexpr const char* view_types[] = {FSUI_NSTR("Game Grid"), FSUI_NSTR("Game List")};
++    static constexpr const char* view_types[] = {FSUI_NSTR("Game Grid"), FSUI_NSTR("Game List"),
++                                                 FSUI_NSTR("Game Carousel")};
+     static constexpr const char* sort_types[] = {
+       FSUI_NSTR("Type"),        FSUI_NSTR("Serial"),      FSUI_NSTR("Title"),     FSUI_NSTR("File Title"),
+       FSUI_NSTR("Time Played"), FSUI_NSTR("Last Played"), FSUI_NSTR("File Size"), FSUI_NSTR("Uncompressed Size")};
+@@ -6743,8 +6969,13 @@ void FullscreenUI::DrawGameListSettingsWindow()
+   MenuHeading(FSUI_CSTR("Cover Settings"));
+   {
+     DrawFolderSetting(bsi, FSUI_ICONSTR(ICON_FA_FOLDER, "Covers Directory"), "Folders", "Covers", EmuFolders::Covers);
++#ifdef __PS4__
++    if (MenuButton(FSUI_ICONSTR(ICON_FA_DOWNLOAD, "Download Covers"),
++                   FSUI_CSTR("Downloads box art for every game without a cover from libretro's thumbnails.")))
++#else
+     if (MenuButton(FSUI_ICONSTR(ICON_FA_DOWNLOAD, "Download Covers"),
+                    FSUI_CSTR("Downloads covers from a user-specified URL template.")))
++#endif
+     {
+       Host::OnCoverDownloaderOpenRequested();
+     }
+@@ -6774,7 +7005,9 @@ void FullscreenUI::DrawGameListSettingsWindow()
+ void FullscreenUI::SwitchToGameList()
+ {
+   s_current_main_window = MainWindowType::GameList;
+-  s_game_list_view = static_cast<GameListView>(Host::GetBaseIntSettingValue("Main", "DefaultFullscreenUIGameView", 0));
++  s_game_list_view = static_cast<GameListView>(
++    std::clamp<s32>(Host::GetBaseIntSettingValue("Main", "DefaultFullscreenUIGameView", 0), 0,
++                    static_cast<s32>(GameListView::Count) - 1));
+   {
+     auto lock = Host::GetSettingsLock();
+     PopulateGameListDirectoryCache(Host::Internal::GetBaseSettingsLayer());
 diff --git a/src/core/game_database.cpp b/src/core/game_database.cpp
 index a36b1a4f..bcff5f3b 100644
 --- a/src/core/game_database.cpp
@@ -642,6 +955,969 @@ index 1afeb3dc..f75ae155 100644
  #ifdef __SWITCH__
      case AudioBackend::Switch:
        return AudioStream::CreateSwitchAudioStream(sample_rate, channels, buffer_ms, latency_ms, stretch);
+diff --git a/src/core/ps4_cover_download.cpp b/src/core/ps4_cover_download.cpp
+new file mode 100644
+index 00000000..1ae9db83
+--- /dev/null
++++ b/src/core/ps4_cover_download.cpp
+@@ -0,0 +1,940 @@
++// SPDX-FileCopyrightText: EmuSuNi (github.com/arturofuentes1988/EmuSuNi)
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "ps4_cover_download.h"
++
++#include "fullscreen_ui.h"
++#include "game_list.h"
++#include "host.h"
++#include "settings.h"
++
++#include "util/imgui_fullscreen.h"
++#include "util/ps4_net.h"
++
++#include "common/file_system.h"
++#include "common/log.h"
++#include "common/path.h"
++
++#include <algorithm>
++#include <atomic>
++#include <cctype>
++#include <cmath>
++#include <ctime>
++#include <map>
++#include <memory>
++#include <set>
++#include <sstream>
++#include <thread>
++#include <unordered_map>
++#include <vector>
++
++#include <sys/stat.h>
++
++Log_SetChannel(PS4CoverDownload);
++
++namespace PS4CoverDownload {
++namespace {
++
++constexpr const char* SERVER = "http://thumbnails.libretro.com/Sony%20-%20PlayStation/";
++constexpr const char* GITHUB_REPO = "libretro-thumbnails/Sony_-_PlayStation";
++constexpr const char* PROGRESS_ID = "ps4_cover_download";
++
++struct Kind
++{
++  const char* folder;
++  const char* cache;
++  const char* label;
++};
++constexpr Kind KINDS[] = {{"Named_Boxarts", ".libretro-boxarts.txt", "box"},
++                          {"Named_Titles", ".libretro-titles.txt", "title screen"}};
++constexpr int KIND_COUNT = 2;
++
++struct Game
++{
++  std::string key;
++  std::string id;
++  std::string title;
++  std::string region;
++  bool multi_disc = false;
++};
++
++std::atomic<bool> s_running{false};
++
++std::string DecodeHref(const std::string& href)
++{
++  static const std::pair<const char*, char> ENTITIES[] = {
++    {"&amp;", '&'}, {"&#39;", '\''}, {"&quot;", '"'}, {"&lt;", '<'}, {"&gt;", '>'}};
++  std::string html;
++  for (size_t i = 0; i < href.size(); i++)
++  {
++    if (href[i] == '&')
++    {
++      bool known = false;
++      for (const auto& [entity, ch] : ENTITIES)
++      {
++        const size_t length = std::char_traits<char>::length(entity);
++        if (href.compare(i, length, entity) == 0)
++        {
++          html += ch;
++          i += length - 1;
++          known = true;
++          break;
++        }
++      }
++      if (known)
++        continue;
++    }
++    html += href[i];
++  }
++  std::string out;
++  for (size_t i = 0; i < html.size(); i++)
++  {
++    if (html[i] == '%' && i + 2 < html.size() && std::isxdigit(static_cast<unsigned char>(html[i + 1])) &&
++        std::isxdigit(static_cast<unsigned char>(html[i + 2])))
++    {
++      out += static_cast<char>(std::stoi(html.substr(i + 1, 2), nullptr, 16));
++      i += 2;
++    }
++    else
++    {
++      out += html[i];
++    }
++  }
++  return out;
++}
++
++std::vector<std::string> ListedPictures(const std::string& html)
++{
++  std::vector<std::string> names;
++  for (size_t at = html.find("href=\""); at != std::string::npos; at = html.find("href=\"", at + 6))
++  {
++    const size_t start = at + 6;
++    const size_t end = html.find('"', start);
++    if (end == std::string::npos)
++      break;
++    const std::string name = DecodeHref(html.substr(start, end - start));
++    if (name.size() > 4 && name.compare(name.size() - 4, 4, ".png") == 0 && name.find('/') == std::string::npos &&
++        name.find('?') == std::string::npos)
++    {
++      names.push_back(name.substr(0, name.size() - 4));
++    }
++  }
++  return names;
++}
++
++std::vector<std::string> Paths(const std::string& json, std::vector<std::string>* shas)
++{
++  std::vector<std::string> paths;
++  auto read_string = [&](size_t at, size_t* end) {
++    std::string value;
++    size_t i = at;
++    for (; i < json.size() && json[i] != '"'; i++)
++    {
++      if (json[i] == '\\' && i + 1 < json.size())
++      {
++        const char next = json[++i];
++        if (next == 'u' && i + 4 < json.size())
++        {
++          const unsigned code = std::stoul(json.substr(i + 1, 4), nullptr, 16);
++          i += 4;
++          if (code < 0x80)
++          {
++            value += static_cast<char>(code);
++          }
++          else if (code < 0x800)
++          {
++            value += static_cast<char>(0xC0 | (code >> 6));
++            value += static_cast<char>(0x80 | (code & 0x3F));
++          }
++          else
++          {
++            value += static_cast<char>(0xE0 | (code >> 12));
++            value += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
++            value += static_cast<char>(0x80 | (code & 0x3F));
++          }
++        }
++        else
++        {
++          value += next == 'n' ? '\n' : next;
++        }
++      }
++      else
++      {
++        value += json[i];
++      }
++    }
++    *end = i;
++    return value;
++  };
++  for (size_t at = json.find("\"path\""); at != std::string::npos; at = json.find("\"path\"", at + 6))
++  {
++    const size_t quote = json.find('"', json.find(':', at) + 1);
++    if (quote == std::string::npos)
++      break;
++    size_t end = quote;
++    paths.push_back(read_string(quote + 1, &end));
++    if (shas)
++    {
++      const size_t object_end = json.find('}', end);
++      const size_t f = json.find("\"sha\"", end);
++      if (f == std::string::npos || f > object_end)
++      {
++        shas->emplace_back();
++      }
++      else
++      {
++        const size_t q = json.find('"', json.find(':', f) + 1);
++        size_t e = q;
++        shas->push_back(read_string(q + 1, &e));
++      }
++    }
++  }
++  return paths;
++}
++
++std::vector<std::string> Names(const Kind& kind, const std::string& covers_dir, std::string* error,
++                               PS4Net::Session* session)
++{
++  const std::string cache = Path::Combine(covers_dir, kind.cache);
++  std::vector<std::string> names;
++  struct stat info = {};
++  if (stat(cache.c_str(), &info) == 0 && std::time(nullptr) - info.st_mtime < 7 * 24 * 3600)
++  {
++    if (const std::optional<std::string> text = FileSystem::ReadFileToString(cache.c_str()))
++    {
++      std::istringstream in(*text);
++      std::string line;
++      while (std::getline(in, line))
++      {
++        if (!line.empty())
++          names.push_back(line);
++      }
++      if (!names.empty())
++        return names;
++    }
++  }
++  auto keep = [&](const char* where) {
++    std::string text;
++    for (const std::string& name : names)
++      text += name + "\n";
++    FileSystem::WriteBinaryFile(cache.c_str(), text.data(), text.size());
++    Log_InfoPrintf("%zu %s pictures listed by %s", names.size(), kind.label, where);
++  };
++  {
++    PS4Net::Request request;
++    request.url = std::string(SERVER) + kind.folder + "/";
++    std::string html, server_error;
++    const long status = PS4Net::GetText(request, &html, 16 << 20, &server_error, session);
++    if (status == 200)
++      names = ListedPictures(html);
++    if (!names.empty())
++    {
++      keep("thumbnails.libretro.com");
++      return names;
++    }
++    Log_WarningPrintf("thumbnails.libretro.com: %s; asking GitHub",
++                      server_error.empty() ? ("HTTP " + std::to_string(status)).c_str() : server_error.c_str());
++  }
++  PS4Net::Request request;
++  request.headers = {"Accept: application/vnd.github+json"};
++  std::string root;
++  for (const char* branch : {"master", "main"})
++  {
++    request.url = std::string("https://api.github.com/repos/") + GITHUB_REPO + "/git/trees/" + branch;
++    if (PS4Net::GetText(request, &root, 1 << 20, error, session) == 200)
++      break;
++    root.clear();
++  }
++  if (root.empty())
++  {
++    if (error->empty())
++      *error = "GitHub didn't answer";
++    return {};
++  }
++  std::vector<std::string> shas;
++  const std::vector<std::string> top = Paths(root, &shas);
++  std::string sha;
++  for (size_t i = 0; i < top.size(); i++)
++  {
++    if (top[i] == kind.folder && i < shas.size())
++      sha = shas[i];
++  }
++  if (sha.empty())
++  {
++    *error = std::string("no ") + kind.folder + " folder in libretro's thumbnails";
++    return {};
++  }
++  std::string listing;
++  request.url = std::string("https://api.github.com/repos/") + GITHUB_REPO + "/git/trees/" + sha;
++  if (PS4Net::GetText(request, &listing, 16 << 20, error, session) != 200)
++  {
++    if (error->empty())
++      *error = "the list of pictures couldn't be read";
++    return {};
++  }
++  for (const std::string& path : Paths(listing, nullptr))
++  {
++    if (path.size() > 4 && path.compare(path.size() - 4, 4, ".png") == 0)
++      names.push_back(path.substr(0, path.size() - 4));
++  }
++  keep("GitHub");
++  return names;
++}
++
++std::string Undecorated(const std::string& name)
++{
++  size_t i = 0;
++  const char open = !name.empty() && (name[0] == '[' || name[0] == '(' || name[0] == '#') ? name[0] : '\0';
++  if (open)
++    i++;
++  const size_t digits = i;
++  while (i < name.size() && std::isdigit(static_cast<unsigned char>(name[i])))
++    i++;
++  if (i == digits || i - digits > 4)
++    return {};
++  if (open == '[' || open == '(')
++  {
++    if (i >= name.size() || name[i] != (open == '[' ? ']' : ')'))
++      return {};
++    i++;
++  }
++  const size_t separator = i;
++  while (i < name.size() && (name[i] == ' ' || name[i] == '-' || name[i] == '_' || name[i] == '.' || name[i] == ')'))
++    i++;
++  if (i == separator && !open)
++    return {};
++  if (i >= name.size() || !std::isalnum(static_cast<unsigned char>(name[i])))
++    return {};
++  const std::string rest = name.substr(i);
++  const bool letters =
++    std::any_of(rest.begin(), rest.end(), [](char c) { return std::isalpha(static_cast<unsigned char>(c)); });
++  return letters ? rest : std::string();
++}
++
++std::string TitlePart(const std::string& name)
++{
++  for (size_t i = 1; i < name.size(); i++)
++  {
++    if (name[i] == '(' || name[i] == '[')
++      return name.substr(0, i);
++  }
++  return name;
++}
++
++std::vector<std::string> Words(const std::string& text)
++{
++  static const std::map<std::string, std::string> ROMAN = {{"ii", "2"},  {"iii", "3"}, {"iv", "4"},
++                                                            {"v", "5"},   {"vi", "6"},  {"vii", "7"},
++                                                            {"viii", "8"}, {"ix", "9"}};
++  std::vector<std::string> words;
++  std::string word;
++  auto flush = [&] {
++    if (word.empty())
++      return;
++    if (const auto it = ROMAN.find(word); it != ROMAN.end())
++      word = it->second;
++    if (word != "the" && word != "a" && word != "an" && word != "and")
++      words.push_back(word);
++    word.clear();
++  };
++  for (const char ch : text)
++  {
++    const unsigned char c = static_cast<unsigned char>(ch);
++    if (c == '\'' || c == '.')
++      continue;
++    if (c == '$')
++      word += 's';
++    else if (std::isalnum(c))
++      word += static_cast<char>(std::tolower(c));
++    else
++      flush();
++  }
++  flush();
++  return words;
++}
++
++std::string Joined(const std::vector<std::string>& words, const char* separator = "")
++{
++  std::string out;
++  for (const std::string& word : words)
++    out += (out.empty() ? "" : separator) + word;
++  return out;
++}
++
++std::vector<std::string> Numbers(const std::vector<std::string>& words)
++{
++  std::vector<std::string> numbers;
++  for (const std::string& word : words)
++  {
++    if (std::all_of(word.begin(), word.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
++      numbers.push_back(word);
++  }
++  std::sort(numbers.begin(), numbers.end());
++  return numbers;
++}
++
++std::vector<std::string> Parts(const std::string& title)
++{
++  std::vector<std::string> parts;
++  size_t start = 0;
++  for (size_t at; (at = title.find(" - ", start)) != std::string::npos; start = at + 3)
++    parts.push_back(title.substr(start, at - start));
++  parts.push_back(title.substr(start));
++  return parts;
++}
++
++double Similarity(const std::string& a, const std::string& b)
++{
++  if (a.empty() || b.empty())
++    return 0.0;
++  std::vector<int> previous(b.size() + 1, 0), row(b.size() + 1, 0);
++  for (size_t i = 1; i <= a.size(); i++)
++  {
++    for (size_t j = 1; j <= b.size(); j++)
++      row[j] = a[i - 1] == b[j - 1] ? previous[j - 1] + 1 : std::max(previous[j], row[j - 1]);
++    std::swap(previous, row);
++  }
++  return 2.0 * previous[b.size()] / static_cast<double>(a.size() + b.size());
++}
++
++class NameIndex
++{
++public:
++  explicit NameIndex(const std::vector<std::string>& names)
++  {
++    for (const std::string& name : names)
++    {
++      const std::string title = TitlePart(name);
++      std::vector<std::string> words = Words(title);
++      const std::string key = Joined(words);
++      if (key.empty())
++        continue;
++      Entry& entry = m_names[key];
++      if (entry.names.empty())
++        entry.words = words;
++      entry.names.push_back(&name);
++      std::sort(words.begin(), words.end());
++      m_sorted[Joined(words, " ")].push_back(&name);
++      const std::vector<std::string> parts = Parts(title);
++      if (parts.size() > 1)
++      {
++        m_first[Joined(Words(parts[0]))].push_back(&name);
++        for (size_t i = 1; i < parts.size(); i++)
++        {
++          const std::string part = Joined(Words(parts[i]));
++          if (part.size() >= 6)
++            m_subtitle[part].push_back(&name);
++        }
++      }
++    }
++  }
++
++  std::vector<const std::string*> Find(const std::string& stem, std::string* how, bool strict = false) const
++  {
++    const std::string title = TitlePart(stem);
++    const std::vector<std::string> words = Words(title);
++    const std::string key = Joined(words);
++    if (key.empty())
++      return {};
++    auto found = [&](const std::vector<const std::string*>& names, const char* way) {
++      *how = way;
++      return names;
++    };
++    if (const auto it = m_names.find(key); it != m_names.end())
++      return found(it->second.names, "same name");
++    if (strict)
++      return {};
++    {
++      std::vector<std::string> sorted = words;
++      std::sort(sorted.begin(), sorted.end());
++      if (const auto it = m_sorted.find(Joined(sorted, " ")); it != m_sorted.end())
++        return found(it->second, "same words");
++    }
++    const std::vector<std::string> parts = Parts(title);
++    if (parts.size() > 1)
++    {
++      if (const auto it = m_names.find(Joined(Words(parts[0]))); it != m_names.end())
++        return found(it->second.names, "its first part");
++      for (size_t i = 1; i < parts.size(); i++)
++      {
++        const std::string part = Joined(Words(parts[i]));
++        const auto it = m_subtitle.find(part);
++        if (part.size() >= 6 && it != m_subtitle.end() && it->second.size() <= 3)
++          return found(it->second, "same subtitle");
++      }
++    }
++    if (const auto it = m_first.find(key); it != m_first.end())
++      return found(it->second, "their first part");
++    if (const auto it = m_subtitle.find(key); it != m_subtitle.end() && it->second.size() <= 3)
++      return found(it->second, "their subtitle");
++    const std::vector<std::string> numbers = Numbers(words);
++    {
++      const Entry* best = nullptr;
++      double best_score = 0.88;
++      for (const auto& [name_key, entry] : m_names)
++      {
++        const double longer = static_cast<double>(std::max(name_key.size(), key.size()));
++        if (std::abs(static_cast<double>(name_key.size()) - static_cast<double>(key.size())) > longer * 0.25)
++          continue;
++        const double score = Similarity(key, name_key);
++        if (score > best_score && Numbers(entry.words) == numbers)
++        {
++          best = &entry;
++          best_score = score;
++        }
++      }
++      if (best)
++        return found(best->names, "close spelling");
++    }
++    {
++      const Entry* best = nullptr;
++      int hits = 0;
++      for (const auto& [name_key, entry] : m_names)
++      {
++        const std::string& shorter = name_key.size() <= key.size() ? name_key : key;
++        const std::string& longer = name_key.size() <= key.size() ? key : name_key;
++        if (shorter.size() >= 9 && shorter.size() * 100 >= longer.size() * 45 &&
++            longer.find(shorter) != std::string::npos && Numbers(entry.words) == numbers)
++        {
++          hits++;
++          if (!best || name_key.size() > Joined(best->words).size())
++            best = &entry;
++        }
++      }
++      if (best && hits <= 2)
++        return found(best->names, "inside");
++    }
++    if (words.size() >= 2)
++    {
++      const Entry* best = nullptr;
++      double best_share = 0.0;
++      for (const auto& [name_key, entry] : m_names)
++      {
++        const bool all = std::all_of(words.begin(), words.end(), [&](const std::string& word) {
++          return std::find(entry.words.begin(), entry.words.end(), word) != entry.words.end();
++        });
++        const double share = static_cast<double>(words.size()) / static_cast<double>(entry.words.size());
++        if (all && share > best_share)
++        {
++          best = &entry;
++          best_share = share;
++        }
++      }
++      if (best && best_share >= 0.5)
++        return found(best->names, "words");
++    }
++    return {};
++  }
++
++private:
++  struct Entry
++  {
++    std::vector<std::string> words;
++    std::vector<const std::string*> names;
++  };
++  std::map<std::string, Entry> m_names;
++  std::map<std::string, std::vector<const std::string*>> m_sorted, m_first, m_subtitle;
++};
++
++const std::string* Pick(const std::vector<const std::string*>& candidates, const Game& game)
++{
++  const std::string* best = nullptr;
++  int best_score = -1000;
++  const std::string bare_id = Undecorated(game.id);
++  for (const std::string* name : candidates)
++  {
++    int score = *name == game.id || (!bare_id.empty() && *name == bare_id) ? 20 : 0;
++    if (!game.region.empty() &&
++        (name->find("(" + game.region) != std::string::npos || name->find(", " + game.region) != std::string::npos))
++      score += 10;
++    if (game.multi_disc && name->find("(Disc 1)") != std::string::npos)
++      score += 3;
++    if (name->find("(USA") != std::string::npos)
++      score += 2;
++    for (const char* bad : {"(Beta", "(Proto", "(Sample", "(Demo", "(Pirate", "(Unl"})
++    {
++      if (name->find(bad) != std::string::npos)
++        score -= 5;
++    }
++    if (name->find("SymbolicLink") != std::string::npos)
++      score -= 8;
++    for (const char* rerelease : {"PSOne Books", "Greatest Hits", "Platinum", "Best", "Edition)"})
++    {
++      if (name->find(rerelease) != std::string::npos)
++        score -= 3;
++    }
++    score -= std::max(0, static_cast<int>(std::count(name->begin(), name->end(), '(')) - 1);
++    if (name->find('[') != std::string::npos)
++      score -= 4;
++    if (score > best_score)
++    {
++      best_score = score;
++      best = name;
++    }
++  }
++  return best;
++}
++
++bool Filler(const std::string& word)
++{
++  static const std::set<std::string> FILLER = {"of", "in",  "on", "to", "no",  "vs", "de", "del", "la",
++                                               "las", "el", "los", "lo", "y",   "e",  "en", "un",  "una",
++                                               "da", "do",  "du", "le", "les", "des", "di", "il"};
++  return FILLER.count(word) > 0;
++}
++
++bool IsNumber(const std::string& word)
++{
++  return !word.empty() &&
++         std::all_of(word.begin(), word.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
++}
++
++std::vector<std::string> ContentWords(const std::vector<std::string>& words)
++{
++  std::vector<std::string> out;
++  for (const std::string& word : words)
++  {
++    if (!Filler(word))
++      out.push_back(word);
++  }
++  return out;
++}
++
++struct Title
++{
++  std::string joined;
++  std::vector<std::string> words, numbers;
++  std::vector<const std::string*> names;
++};
++
++struct Titles
++{
++  std::vector<Title> titles;
++  std::unordered_map<std::string, int> uses;
++};
++
++Titles ReadTitles(const std::vector<std::string>& names)
++{
++  Titles list;
++  std::unordered_map<std::string, size_t> at;
++  for (const std::string& name : names)
++  {
++    const std::vector<std::string> all = Words(TitlePart(name));
++    std::vector<std::string> words = ContentWords(all);
++    std::string joined = Joined(words);
++    if (joined.empty())
++      continue;
++    const auto it = at.find(joined);
++    if (it != at.end())
++    {
++      list.titles[it->second].names.push_back(&name);
++      continue;
++    }
++    at.emplace(joined, list.titles.size());
++    for (const std::string& word : std::set<std::string>(words.begin(), words.end()))
++      list.uses[word]++;
++    list.titles.push_back({std::move(joined), std::move(words), Numbers(all), {&name}});
++  }
++  return list;
++}
++
++bool Significant(const Titles& list, const std::string& word)
++{
++  if (word.size() < (IsNumber(word) ? 3u : 4u))
++    return false;
++  const auto it = list.uses.find(word);
++  return it == list.uses.end() || static_cast<size_t>(it->second) * 50 < list.titles.size();
++}
++
++const std::string* Nearest(const Titles& list, const std::string& stem, const Game& game, bool* sure)
++{
++  *sure = false;
++  const std::vector<std::string> all = Words(TitlePart(stem));
++  const std::vector<std::string> wanted = ContentWords(all);
++  if (wanted.empty())
++    return nullptr;
++  const std::string joined = Joined(wanted);
++  const std::vector<std::string> numbers = Numbers(all);
++  const Title* best = nullptr;
++  double best_score = 0.0;
++  for (const Title& title : list.titles)
++  {
++    bool other_game = false;
++    double number_penalty = 0.0;
++    for (const std::string& number : title.numbers)
++      other_game = other_game || std::find(numbers.begin(), numbers.end(), number) == numbers.end();
++    for (const std::string& number : numbers)
++    {
++      if (std::find(title.numbers.begin(), title.numbers.end(), number) == title.numbers.end())
++      {
++        if (number.size() == 1)
++          other_game = true;
++        else
++          number_penalty += 20.0;
++      }
++    }
++    if (other_game)
++      continue;
++    double shared = 0.0;
++    bool significant = false;
++    for (const std::string& word : wanted)
++    {
++      if (std::find(title.words.begin(), title.words.end(), word) != title.words.end())
++      {
++        shared += 1.0;
++        significant = significant || Significant(list, word);
++      }
++    }
++    const double close = Similarity(joined, title.joined);
++    const std::string& shorter = title.joined.size() <= joined.size() ? title.joined : joined;
++    const std::string& longer = title.joined.size() <= joined.size() ? joined : title.joined;
++    const bool inside = shorter.size() >= 6 && longer.find(shorter) != std::string::npos;
++    if (!significant && !(inside && shorter.size() >= 8) && close < 0.8)
++      continue;
++    const double coverage = shared / static_cast<double>(wanted.size());
++    const double precision = shared / static_cast<double>(title.words.size());
++    const double score = coverage * 60.0 + precision * 25.0 + close * 60.0 + (inside ? 15.0 : 0.0) - number_penalty;
++    if (score > best_score)
++    {
++      best_score = score;
++      best = &title;
++      *sure = number_penalty == 0.0 && close >= 0.9;
++    }
++  }
++  return best ? Pick(best->names, game) : nullptr;
++}
++
++const char* RegionName(DiscRegion region)
++{
++  switch (region)
++  {
++    case DiscRegion::NTSC_U:
++      return "USA";
++    case DiscRegion::NTSC_J:
++      return "Japan";
++    case DiscRegion::PAL:
++      return "Europe";
++    default:
++      return "";
++  }
++}
++
++std::vector<Game> CollectGames(int* already)
++{
++  std::vector<Game> games;
++  const auto lock = GameList::GetLock();
++  const u32 count = GameList::GetEntryCount();
++  for (u32 i = 0; i < count; i++)
++  {
++    const GameList::Entry* entry = GameList::GetEntryByIndex(i);
++    if (!entry || (entry->type != GameList::EntryType::Disc && entry->type != GameList::EntryType::Playlist))
++      continue;
++    if (!GameList::GetCoverImagePathForEntry(entry).empty())
++    {
++      (*already)++;
++      continue;
++    }
++    Game game;
++    game.id = std::string(Path::GetFileTitle(entry->path));
++    game.title = entry->title;
++    game.key = entry->serial.empty() ? Path::SanitizeFileName(game.id) : Path::SanitizeFileName(entry->serial);
++    game.region = RegionName(entry->region);
++    game.multi_disc = entry->type == GameList::EntryType::Playlist || entry->disc_set_index >= 0 ||
++                      game.id.find("Disc") != std::string::npos;
++    games.push_back(std::move(game));
++  }
++  return games;
++}
++
++bool IsPng(const std::string& data)
++{
++  return data.size() > 8 && data.compare(1, 3, "PNG") == 0;
++}
++
++void Run()
++{
++  const std::string covers_dir = EmuFolders::Covers;
++  FileSystem::CreateDirectory(covers_dir.c_str(), true);
++
++  int already = 0, downloaded = 0, not_found = 0, failed = 0;
++  std::string first_error;
++  std::vector<Game> games = CollectGames(&already);
++  const int total = static_cast<int>(games.size());
++  Log_InfoPrintf("%d games without a cover, %d already have one", total, already);
++
++  ImGuiFullscreen::OpenBackgroundProgressDialog(PROGRESS_ID, "Downloading covers...", 0, std::max(total, 1), 0);
++
++  PS4Net::Session session;
++  std::vector<std::string> names[KIND_COUNT];
++  std::unique_ptr<NameIndex> indexes[KIND_COUNT];
++  std::unique_ptr<Titles> titles[KIND_COUNT];
++  bool listed[KIND_COUNT] = {};
++  bool github = true;
++
++  for (int i = 0; i < total; i++)
++  {
++    const Game& game = games[i];
++    ImGuiFullscreen::UpdateBackgroundProgressDialog(
++      PROGRESS_ID, "Downloading covers: " + (game.title.empty() ? game.id : game.title), 0, total, i);
++
++    std::vector<std::string> stems = {game.id};
++    if (!game.title.empty() && game.title != game.id)
++      stems.push_back(game.title);
++    std::vector<std::string> bare;
++    for (const std::string& stem : stems)
++    {
++      const std::string without = Undecorated(stem);
++      if (!without.empty() && std::find(stems.begin(), stems.end(), without) == stems.end() &&
++          std::find(bare.begin(), bare.end(), without) == bare.end())
++        bare.push_back(without);
++    }
++    struct Pass
++    {
++      const std::vector<std::string>* names;
++      bool strict;
++    };
++    std::vector<Pass> passes = {{&stems, false}};
++    if (!bare.empty())
++      passes = {{&stems, true}, {&bare, false}, {&stems, false}};
++
++    const std::string* name = nullptr;
++    const Kind* kind = nullptr;
++    std::string how;
++    for (const Pass& pass : passes)
++    {
++      for (int k = 0; k < KIND_COUNT && !name; k++)
++      {
++        if (!listed[k])
++        {
++          listed[k] = true;
++          std::string error;
++          names[k] = Names(KINDS[k], covers_dir, &error, &session);
++          indexes[k] = std::make_unique<NameIndex>(names[k]);
++          if (names[k].empty())
++          {
++            Log_ErrorPrintf("%s: no list: %s", KINDS[k].label, error.c_str());
++            if (first_error.empty())
++              first_error = PS4Net::Plain(0, error);
++          }
++        }
++        for (size_t s = 0; s < pass.names->size() && !name; s++)
++          name = Pick(indexes[k]->Find((*pass.names)[s], &how, pass.strict), game);
++        if (name)
++          kind = &KINDS[k];
++      }
++      if (name)
++        break;
++    }
++
++    for (int k = 0; !name && k < KIND_COUNT; k++)
++    {
++      if (names[k].empty())
++        continue;
++      if (!titles[k])
++        titles[k] = std::make_unique<Titles>(ReadTitles(names[k]));
++      for (const std::vector<std::string>* tried : {&stems, &bare})
++      {
++        for (const std::string& stem : *tried)
++        {
++          bool sure = false;
++          const std::string* guess = Nearest(*titles[k], stem, game, &sure);
++          if (guess && sure)
++          {
++            name = guess;
++            kind = &KINDS[k];
++            how = "closest";
++            break;
++          }
++        }
++        if (name)
++          break;
++      }
++    }
++
++    if (!name)
++    {
++      if (names[0].empty())
++        failed++;
++      else
++        not_found++;
++      Log_WarningPrintf("%s: no picture found", game.id.c_str());
++      continue;
++    }
++
++    Log_InfoPrintf("%s -> %s (%s, %s)", game.id.c_str(), name->c_str(), kind->label, how.c_str());
++    const std::string target = Path::Combine(covers_dir, game.key + ".png");
++    if (FileSystem::FileExists(target.c_str()))
++    {
++      already++;
++      continue;
++    }
++
++    PS4Net::Request request;
++    request.url = std::string(SERVER) + kind->folder + "/" + PS4Net::UrlEncode(*name) + ".png";
++    std::string picture, error;
++    long status = PS4Net::GetText(request, &picture, 8 << 20, &error, &session);
++    if ((status != 200 || !IsPng(picture)) && github)
++    {
++      request.url = std::string("https://raw.githubusercontent.com/") + GITHUB_REPO + "/master/" + kind->folder +
++                    "/" + PS4Net::UrlEncode(*name) + ".png";
++      error.clear();
++      status = PS4Net::GetText(request, &picture, 8 << 20, &error, &session);
++      if (status == 0)
++        github = false;
++    }
++    if (status != 200 || !IsPng(picture))
++    {
++      failed++;
++      if (first_error.empty())
++        first_error = status == 200 ? std::string("what came isn't a picture") : PS4Net::Plain(status, error);
++      Log_ErrorPrintf("%s: %s", game.id.c_str(), error.empty() ? ("HTTP " + std::to_string(status)).c_str() : error.c_str());
++      continue;
++    }
++
++    const std::string part = target + ".part";
++    if (FileSystem::WriteBinaryFile(part.c_str(), picture.data(), picture.size()) &&
++        FileSystem::RenamePath(part.c_str(), target.c_str()))
++    {
++      downloaded++;
++    }
++    else
++    {
++      FileSystem::DeleteFile(part.c_str());
++      failed++;
++      if (first_error.empty())
++        first_error = "the storage is full or can't be written";
++    }
++  }
++
++  ImGuiFullscreen::CloseBackgroundProgressDialog(PROGRESS_ID);
++  Log_InfoPrintf("%d downloaded, %d already there, %d not found, %d failed", downloaded, already, not_found, failed);
++
++  std::string message = std::to_string(downloaded) + " downloaded, " + std::to_string(already) + " already there";
++  if (not_found > 0)
++    message += ", " + std::to_string(not_found) + " not found";
++  if (failed > 0)
++    message += ", " + std::to_string(failed) + " failed (" + first_error + ")";
++
++  Host::RunOnCPUThread([message = std::move(message)]() {
++    FullscreenUI::InvalidateCoverCache();
++    ImGuiFullscreen::ShowToast("Covers", message, 10.0f);
++  });
++  s_running.store(false);
++}
++
++}
++
++void Start()
++{
++  bool expected = false;
++  if (!s_running.compare_exchange_strong(expected, true))
++    return;
++  std::thread(Run).detach();
++}
++
++bool IsRunning()
++{
++  return s_running.load();
++}
++
++}
+diff --git a/src/core/ps4_cover_download.h b/src/core/ps4_cover_download.h
+new file mode 100644
+index 00000000..1e70654d
+--- /dev/null
++++ b/src/core/ps4_cover_download.h
+@@ -0,0 +1,11 @@
++// SPDX-FileCopyrightText: EmuSuNi (github.com/arturofuentes1988/EmuSuNi)
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#pragma once
++
++namespace PS4CoverDownload {
++
++void Start();
++bool IsRunning();
++
++}
 diff --git a/src/core/settings.cpp b/src/core/settings.cpp
 index 759d0b46..7b518be1 100644
 --- a/src/core/settings.cpp
@@ -739,20 +2015,32 @@ index 96922545..e747f3ec 100644
    enable_language(ASM)
  
 diff --git a/src/duckstation-nogui/nogui_host.cpp b/src/duckstation-nogui/nogui_host.cpp
-index 5e3b0cbf..bcd052ca 100644
+index 5e3b0cbf..ec4dd760 100644
 --- a/src/duckstation-nogui/nogui_host.cpp
 +++ b/src/duckstation-nogui/nogui_host.cpp
-@@ -46,6 +46,9 @@
+@@ -37,7 +37,10 @@
+ #include "common/string_util.h"
+ #include "common/threading.h"
+ 
++#include <atomic>
+ #include <cinttypes>
++#include <mutex>
++#include <unordered_map>
+ #include <cmath>
+ #include <condition_variable>
+ #include <csignal>
+@@ -46,6 +49,10 @@
  #ifdef __SWITCH__
  #include <switch.h>
  #endif
 +#ifdef __PS4__
 +#include "common/ps4_host.h"
++#include "core/ps4_cover_download.h"
 +#endif
  
  Log_SetChannel(NoGUIHost);
  
-@@ -197,7 +200,9 @@ void NoGUIHost::SetAppRoot()
+@@ -197,7 +204,9 @@ void NoGUIHost::SetAppRoot()
  
  void NoGUIHost::SetResourcesDirectory()
  {
@@ -763,7 +2051,7 @@ index 5e3b0cbf..bcd052ca 100644
    EmuFolders::Resources = "romfs:/resources";
  #else
    EmuFolders::Resources = Path::Combine(EmuFolders::AppRoot, "resources");
-@@ -210,6 +215,12 @@ void NoGUIHost::SetDataDirectory()
+@@ -210,6 +219,12 @@ void NoGUIHost::SetDataDirectory()
    if (!EmuFolders::DataRoot.empty())
      return;
  
@@ -776,7 +2064,208 @@ index 5e3b0cbf..bcd052ca 100644
    if (ShouldUsePortableMode())
    {
      EmuFolders::DataRoot = EmuFolders::AppRoot;
-@@ -830,7 +841,11 @@ void Host::PumpMessagesOnCPUThread()
+@@ -229,6 +244,10 @@ void NoGUIHost::SetDataDirectory()
+     EmuFolders::DataRoot = EmuFolders::AppRoot;
+ }
+ 
++#ifdef __PS4__
++static void PS4ApplyLanguage(const std::string& code);
++#endif
++
+ bool NoGUIHost::InitializeConfig(std::string settings_filename)
+ {
+   if (!SetCriticalFolders())
+@@ -260,6 +279,9 @@ bool NoGUIHost::InitializeConfig(std::string settings_filename)
+ 
+   EmuFolders::LoadConfig(*s_base_settings_interface.get());
+   EmuFolders::EnsureFoldersExist();
++#ifdef __PS4__
++  PS4ApplyLanguage(s_base_settings_interface->GetStringValue("Main", "Language", ""));
++#endif
+ 
+   // We need to create the console window early, otherwise it appears behind the main window.
+   if (!Log::IsConsoleOutputEnabled() &&
+@@ -331,6 +353,75 @@ void Host::ReportDebuggerMessage(const std::string_view& message)
+   Log_ErrorPrintf("ReportDebuggerMessage: %.*s", static_cast<int>(message.size()), message.data());
+ }
+ 
++#ifdef __PS4__
++namespace {
++std::mutex s_ps4_translation_mutex;
++std::unordered_map<std::string, std::string> s_ps4_translations;
++
++void PS4LoadTranslations(const std::string& code)
++{
++  s_ps4_translations.clear();
++  if (code.empty() || code == "en")
++    return;
++
++  const std::optional<std::string> data =
++    Host::ReadResourceFileToString(fmt::format("translations/{}.tsv", code).c_str(), false);
++  if (!data.has_value())
++  {
++    Log_ErrorPrintf("No translation file for '%s'", code.c_str());
++    return;
++  }
++
++  const std::string& text = data.value();
++  size_t pos = 0;
++  while (pos < text.size())
++  {
++    size_t end = text.find('\x1e', pos);
++    if (end == std::string::npos)
++      end = text.size();
++    const size_t a = text.find('\x1f', pos);
++    const size_t b = (a == std::string::npos || a >= end) ? std::string::npos : text.find('\x1f', a + 1);
++    if (a != std::string::npos && a < end && b != std::string::npos && b < end)
++    {
++      std::string key = text.substr(pos, a - pos);
++      key += '\x04';
++      key.append(text, a + 1, b - a - 1);
++      s_ps4_translations[std::move(key)] = text.substr(b + 1, end - b - 1);
++    }
++    pos = end + 1;
++  }
++  Log_InfoPrintf("Loaded %zu strings for language '%s'", s_ps4_translations.size(), code.c_str());
++}
++}
++
++static void PS4ApplyLanguage(const std::string& code)
++{
++  std::unique_lock lock(s_ps4_translation_mutex);
++  PS4LoadTranslations(code);
++}
++
++std::span<const std::pair<const char*, const char*>> Host::GetAvailableLanguageList()
++{
++  static constexpr std::pair<const char*, const char*> languages[] = {
++    {"English", "en"},
++    {"Español (Latinoamérica)", "es"},
++    {"Español (España)", "es-ES"},
++    {"Português (Brasil)", "pt-BR"}};
++  return languages;
++}
++
++bool Host::ChangeLanguage(const char* new_language)
++{
++  Host::SetBaseStringSettingValue("Main", "Language", new_language);
++  Host::CommitBaseSettingChanges();
++  {
++    std::unique_lock lock(s_ps4_translation_mutex);
++    PS4LoadTranslations(new_language);
++  }
++  Host::ClearTranslationCache();
++  return true;
++}
++#else
+ std::span<const std::pair<const char*, const char*>> Host::GetAvailableLanguageList()
+ {
+   return {};
+@@ -340,6 +431,7 @@ bool Host::ChangeLanguage(const char* new_language)
+ {
+   return false;
+ }
++#endif
+ 
+ void Host::AddFixedInputBindings(SettingsInterface& si)
+ {
+@@ -360,6 +452,27 @@ void Host::OnInputDeviceDisconnected(const std::string_view& identifier)
+ s32 Host::Internal::GetTranslatedStringImpl(const std::string_view& context, const std::string_view& msg, char* tbuf,
+                                             size_t tbuf_space)
+ {
++#ifdef __PS4__
++  if (!msg.empty())
++  {
++    std::unique_lock lock(s_ps4_translation_mutex);
++    if (!s_ps4_translations.empty())
++    {
++      std::string key(context);
++      key += '\x04';
++      key.append(msg);
++      const auto it = s_ps4_translations.find(key);
++      if (it != s_ps4_translations.end() && !it->second.empty())
++      {
++        if (it->second.size() > tbuf_space)
++          return -1;
++        std::memcpy(tbuf, it->second.data(), it->second.size());
++        return static_cast<s32>(it->second.size());
++      }
++    }
++  }
++#endif
++
+   if (msg.size() > tbuf_space)
+     return -1;
+   else if (msg.empty())
+@@ -793,9 +906,55 @@ void Host::OnGameChanged(const std::string& disc_path, const std::string& game_s
+   NoGUIHost::UpdateWindowTitle(game_name);
+ }
+ 
++#ifdef __PS4__
++static std::atomic_bool s_ps4_login_running{false};
++
++static void PS4PasswordLogin(bool user_initiated)
++{
++  const std::string username = Host::GetBaseStringSettingValue("Cheevos", "Username");
++  const std::string password = Host::GetBaseStringSettingValue("Cheevos", "Password");
++  if (username.empty() || password.empty())
++  {
++    if (user_initiated)
++    {
++      Host::RunOnCPUThread([]() {
++        ImGuiFullscreen::OpenInfoMessageDialog(
++          "RetroAchievements",
++          "To log in, add these two lines under [Cheevos] in /data/DuckStation/settings.ini (over FTP), then "
++          "start DuckStation again:\n\nUsername = your RetroAchievements name\nPassword = your password\n\n"
++          "The password is removed from the file after the login; only a login token is kept.");
++      });
++    }
++    return;
++  }
++
++  bool expected = false;
++  if (!s_ps4_login_running.compare_exchange_strong(expected, true))
++    return;
++
++  std::thread([username, password]() {
++    Error error;
++    const bool ok = Achievements::Login(username.c_str(), password.c_str(), &error);
++    Host::DeleteBaseSettingValue("Cheevos", "Password");
++    Host::CommitBaseSettingChanges();
++    Log_InfoPrintf("RetroAchievements login for '%s': %s", username.c_str(),
++                   ok ? "ok" : error.GetDescription().c_str());
++    if (!ok)
++    {
++      Host::RunOnCPUThread([message = error.GetDescription()]() {
++        ImGuiFullscreen::ShowToast("RetroAchievements", "Login failed: " + message, 15.0f);
++      });
++    }
++    s_ps4_login_running.store(false);
++  }).detach();
++}
++#endif
++
+ void Host::OnAchievementsLoginRequested(Achievements::LoginRequestReason reason)
+ {
+-  // noop
++#ifdef __PS4__
++  PS4PasswordLogin(reason == Achievements::LoginRequestReason::UserInitiated);
++#endif
+ }
+ 
+ void Host::OnAchievementsLoginSuccess(const char* username, u32 points, u32 sc_points, u32 unread_messages)
+@@ -815,7 +974,9 @@ void Host::OnAchievementsHardcoreModeChanged(bool enabled)
+ 
+ void Host::OnCoverDownloaderOpenRequested()
+ {
+-  // noop
++#ifdef __PS4__
++  PS4CoverDownload::Start();
++#endif
+ }
+ 
+ void Host::SetMouseMode(bool relative, bool hide_cursor)
+@@ -830,7 +991,11 @@ void Host::PumpMessagesOnCPUThread()
  
  std::unique_ptr<NoGUIPlatform> NoGUIHost::CreatePlatform()
  {
@@ -788,7 +2277,7 @@ index 5e3b0cbf..bcd052ca 100644
  }
  
  std::string NoGUIHost::GetWindowTitle(const std::string& game_title)
-@@ -976,7 +991,7 @@ static void SignalHandler(int signal)
+@@ -976,7 +1141,7 @@ static void SignalHandler(int signal)
    std::signal(signal, SIG_DFL);
  
    // MacOS is missing std::quick_exit() despite it being C++11...
@@ -797,7 +2286,17 @@ index 5e3b0cbf..bcd052ca 100644
    std::quick_exit(1);
  #else
    _Exit(1);
-@@ -1442,5 +1457,8 @@ int main(int argc, char* argv[])
+@@ -1428,6 +1593,9 @@ int main(int argc, char* argv[])
+   // the rest of initialization happens on the CPU thread.
+   NoGUIHost::HookSignals();
+   NoGUIHost::StartCPUThread();
++#ifdef __PS4__
++  Host::RunOnCPUThread([]() { PS4PasswordLogin(false); });
++#endif
+ 
+   if (autoboot)
+     NoGUIHost::StartSystem(std::move(autoboot.value()));
+@@ -1442,5 +1610,8 @@ int main(int argc, char* argv[])
  
    NoGUIHost::s_base_settings_interface.reset();
    g_nogui_window.reset();
@@ -994,7 +2493,7 @@ index 00000000..a2a8ea92
 +  return std::make_unique<PS4NoGUIPlatform>();
 +}
 diff --git a/src/util/CMakeLists.txt b/src/util/CMakeLists.txt
-index a54b648e..74b81772 100644
+index a54b648e..a1c21386 100644
 --- a/src/util/CMakeLists.txt
 +++ b/src/util/CMakeLists.txt
 @@ -168,11 +168,14 @@ if(ENABLE_VULKAN)
@@ -1003,8 +2502,8 @@ index a54b648e..74b81772 100644
  
 -if(ENABLE_VULKAN OR APPLE)
 +if(PS4)
-+  target_sources(util PRIVATE ps4_glslang.cpp ps4_glslang.h)
-+  target_link_libraries(util PRIVATE ps4::glslang)
++  target_sources(util PRIVATE ps4_glslang.cpp ps4_glslang.h ps4_net.cpp ps4_net.h)
++  target_link_libraries(util PRIVATE ps4::glslang ps4::curl)
 +elseif(ENABLE_VULKAN OR APPLE)
    target_link_libraries(util PUBLIC Shaderc::shaderc_shared)
  endif()
@@ -1113,15 +2612,135 @@ index 4b83cb0a..a7e8db98 100644
  
 diff --git a/src/util/http_downloader_ps4.cpp b/src/util/http_downloader_ps4.cpp
 new file mode 100644
-index 00000000..ea3f55a7
+index 00000000..b05e27dc
 --- /dev/null
 +++ b/src/util/http_downloader_ps4.cpp
-@@ -0,0 +1,6 @@
+@@ -0,0 +1,126 @@
 +#include "http_downloader.h"
++#include "ps4_net.h"
++
++#include "common/log.h"
++#include "common/timer.h"
++
++#include <algorithm>
++#include <atomic>
++#include <thread>
++
++Log_SetChannel(HTTPDownloader);
++
++namespace {
++
++class HTTPDownloaderPS4 final : public HTTPDownloader
++{
++public:
++  explicit HTTPDownloaderPS4(std::string user_agent) : m_user_agent(std::move(user_agent)) {}
++  ~HTTPDownloaderPS4() override = default;
++
++protected:
++  using State = HTTPDownloader::Request::State;
++
++  struct PS4Request : HTTPDownloader::Request
++  {
++    std::thread worker;
++    std::atomic<bool> cancel{false};
++    std::atomic<bool> finished{false};
++    std::atomic<u32> received{0};
++    std::atomic<u32> expected{0};
++    s32 result_status = 0;
++    std::string result_type;
++    Data result_data;
++  };
++
++  HTTPDownloader::Request* InternalCreateRequest() override { return new PS4Request(); }
++
++  void InternalPollRequests() override
++  {
++    for (HTTPDownloader::Request* base : m_pending_http_requests)
++    {
++      PS4Request* req = static_cast<PS4Request*>(base);
++      const State state = req->state.load(std::memory_order_acquire);
++      if (state != State::Started && state != State::Receiving)
++        continue;
++
++      if (!req->finished.load(std::memory_order_acquire))
++      {
++        if (req->received.load(std::memory_order_relaxed) > 0)
++        {
++          req->content_length = req->expected.load(std::memory_order_relaxed);
++          req->start_time = Common::Timer::GetCurrentValue();
++          req->state.store(State::Receiving, std::memory_order_release);
++        }
++        continue;
++      }
++
++      if (req->worker.joinable())
++        req->worker.join();
++      req->status_code = req->result_status;
++      req->content_type = std::move(req->result_type);
++      req->data = std::move(req->result_data);
++      req->content_length = static_cast<u32>(req->data.size());
++      req->state.store(State::Complete, std::memory_order_release);
++    }
++  }
++
++  bool StartRequest(HTTPDownloader::Request* base) override
++  {
++    PS4Request* req = static_cast<PS4Request*>(base);
++    req->state.store(State::Started, std::memory_order_release);
++    req->start_time = Common::Timer::GetCurrentValue();
++
++    PS4Net::Request net;
++    net.url = req->url;
++    net.method = req->type == HTTPDownloader::Request::Type::Post ? "POST" : "GET";
++    net.body = req->post_data;
++    net.user_agent = m_user_agent;
++    net.timeout_seconds = m_timeout > 0.0f ? static_cast<long>(m_timeout) + 5 : 0;
++    net.error_body = true;
++    net.cancel = &req->cancel;
++    net.progress = [req](int64_t done, int64_t total) {
++      req->received.store(static_cast<u32>(std::max<int64_t>(done, 0)), std::memory_order_relaxed);
++      req->expected.store(static_cast<u32>(std::max<int64_t>(total, 0)), std::memory_order_relaxed);
++      return !req->cancel.load(std::memory_order_relaxed);
++    };
++
++    req->worker = std::thread([req, net = std::move(net)]() {
++      PS4Net::Response response = PS4Net::Fetch(net);
++      if (response.status > 0 && response.error.empty())
++      {
++        req->result_status = static_cast<s32>(response.status);
++        req->result_type = response.Header("Content-Type");
++        req->result_data.assign(response.body.begin(), response.body.end());
++      }
++      else
++      {
++        req->result_status =
++          response.error.find("Timeout") != std::string::npos ? HTTP_STATUS_TIMEOUT : HTTP_STATUS_ERROR;
++        if (response.error != "cancelled")
++          Log_ErrorPrintf("Request for '%s' failed: %s", net.url.c_str(), response.error.c_str());
++      }
++      req->finished.store(true, std::memory_order_release);
++    });
++    return true;
++  }
++
++  void CloseRequest(HTTPDownloader::Request* base) override
++  {
++    PS4Request* req = static_cast<PS4Request*>(base);
++    req->cancel.store(true, std::memory_order_release);
++    if (req->worker.joinable())
++      req->worker.join();
++    delete req;
++  }
++
++private:
++  std::string m_user_agent;
++};
++
++}
 +
 +std::unique_ptr<HTTPDownloader> HTTPDownloader::Create(std::string user_agent)
 +{
-+  return {};
++  return std::make_unique<HTTPDownloaderPS4>(std::move(user_agent));
 +}
 diff --git a/src/util/input_manager.cpp b/src/util/input_manager.cpp
 index 572be5df..6db0eabf 100644
@@ -2083,6 +3702,657 @@ index 00000000..0472a64f
 +  std::array<ControllerData, NUM_CONTROLLERS> m_controllers;
 +  u64 m_next_scan = 0;
 +};
+diff --git a/src/util/ps4_net.cpp b/src/util/ps4_net.cpp
+new file mode 100644
+index 00000000..86403ebd
+--- /dev/null
++++ b/src/util/ps4_net.cpp
+@@ -0,0 +1,565 @@
++// SPDX-FileCopyrightText: EmuSuNi (github.com/arturofuentes1988/EmuSuNi), Dolphin Emulator Project
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "ps4_net.h"
++
++#include "common/log.h"
++
++#include <algorithm>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <mutex>
++
++#include <curl/curl.h>
++#include <orbis/Sysmodule.h>
++
++Log_SetChannel(PS4Net);
++
++extern "C" {
++int sceNetInit(void);
++int sceNetPoolCreate(const char* name, int size, int flags);
++int sceNetResolverCreate(const char* name, int memid, int flags);
++int sceNetResolverDestroy(int rid);
++int sceNetResolverStartNtoa(int rid, const char* hostname, uint32_t* addr, int timeout, int retry, int flags);
++}
++
++namespace PS4Net {
++namespace {
++
++using Clock = std::chrono::steady_clock;
++
++std::mutex s_init_mutex;
++int s_pool = -1;
++constexpr size_t DEFAULT_MAX_BYTES = size_t{64} << 20;
++
++bool Init(std::string* error)
++{
++  std::lock_guard lock(s_init_mutex);
++  if (s_pool >= 0)
++    return true;
++  sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
++  const int init = sceNetInit();
++  s_pool = sceNetPoolCreate("duckstation-net", 64 * 1024, 0);
++  Log_InfoPrintf("init %#x, pool %#x; %s", static_cast<unsigned>(init), static_cast<unsigned>(s_pool),
++                 curl_version());
++  curl_global_init(CURL_GLOBAL_DEFAULT);
++  if (s_pool < 0)
++  {
++    *error = "the PS4 network is not available";
++    return false;
++  }
++  return true;
++}
++
++std::string Lower(std::string text)
++{
++  for (char& c : text)
++  {
++    if (c >= 'A' && c <= 'Z')
++      c = static_cast<char>(c - 'A' + 'a');
++  }
++  return text;
++}
++
++std::string Upper(std::string text)
++{
++  for (char& c : text)
++  {
++    if (c >= 'a' && c <= 'z')
++      c = static_cast<char>(c - 'a' + 'A');
++  }
++  return text;
++}
++
++bool IsAddress(const std::string& host)
++{
++  int dots = 0;
++  for (const char c : host)
++  {
++    if (c == '.')
++      dots++;
++    else if (c < '0' || c > '9')
++      return false;
++  }
++  return dots == 3;
++}
++
++std::string Resolve(const std::string& host, std::string* error)
++{
++  if (IsAddress(host))
++    return host;
++  const int resolver = sceNetResolverCreate("duckstation-net", s_pool, 0);
++  if (resolver < 0)
++  {
++    *error = "the PS4 network is not available";
++    return {};
++  }
++  uint32_t address = 0;
++  const int result = sceNetResolverStartNtoa(resolver, host.c_str(), &address, 5 * 1000 * 1000, 2, 0);
++  sceNetResolverDestroy(resolver);
++  if (result < 0)
++  {
++    char line[160];
++    std::snprintf(line, sizeof(line), "could not look up %s (%#x): is the PS4 online?", host.c_str(),
++                  static_cast<unsigned>(result));
++    *error = line;
++    return {};
++  }
++  char text[32];
++  std::snprintf(text, sizeof(text), "%u.%u.%u.%u", address & 0xFF, (address >> 8) & 0xFF, (address >> 16) & 0xFF,
++                (address >> 24) & 0xFF);
++  return text;
++}
++
++bool SplitUrl(const std::string& url, std::string* scheme, std::string* host, int* port)
++{
++  const size_t colon = url.find("://");
++  if (colon == std::string::npos)
++    return false;
++  *scheme = Lower(url.substr(0, colon));
++  if (*scheme != "http" && *scheme != "https")
++    return false;
++  const size_t start = colon + 3;
++  const size_t end = url.find_first_of("/?#", start);
++  std::string authority = url.substr(start, end == std::string::npos ? std::string::npos : end - start);
++  if (const size_t at = authority.rfind('@'); at != std::string::npos)
++    authority = authority.substr(at + 1);
++  *port = *scheme == "https" ? 443 : 80;
++  const size_t port_colon = authority.rfind(':');
++  if (port_colon != std::string::npos)
++  {
++    const std::string digits = authority.substr(port_colon + 1);
++    char* stop = nullptr;
++    const long value = std::strtol(digits.c_str(), &stop, 10);
++    if (digits.empty() || !stop || *stop != '\0' || value <= 0 || value > 65535)
++      return false;
++    *port = static_cast<int>(value);
++    authority = authority.substr(0, port_colon);
++  }
++  *host = Lower(authority);
++  return !host->empty() && host->find_first_of("[]") == std::string::npos;
++}
++
++std::string HeaderName(const std::string& header)
++{
++  const size_t colon = header.find(':');
++  std::string name = colon == std::string::npos ? header : header.substr(0, colon);
++  while (!name.empty() && name.back() == ' ')
++    name.pop_back();
++  return Lower(name);
++}
++
++struct Transfer
++{
++  CURL* curl = nullptr;
++  const Request* request = nullptr;
++  const Sink* sink = nullptr;
++  bool begun = false;
++  bool keep = false;
++  bool stopped = false;
++  long status = 0;
++  int64_t done = 0;
++  int64_t total = -1;
++  std::vector<std::string> headers;
++  Clock::time_point last_progress{};
++};
++
++void Begin(Transfer* t)
++{
++  t->begun = true;
++  curl_easy_getinfo(t->curl, CURLINFO_RESPONSE_CODE, &t->status);
++  const bool redirect = t->status >= 300 && t->status < 400;
++  t->keep = !redirect && ((t->status >= 200 && t->status < 300) || (t->request->error_body && t->status >= 400));
++  curl_off_t length = -1;
++  curl_easy_getinfo(t->curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &length);
++  t->total = length;
++}
++
++size_t Write(char* data, size_t size, size_t count, void* user)
++{
++  auto* t = static_cast<Transfer*>(user);
++  const size_t bytes = size * count;
++  if (!t->begun)
++    Begin(t);
++  if (t->stopped)
++    return 0;
++  if (!t->keep)
++    return bytes;
++  if (*t->sink && !(*t->sink)(data, bytes))
++  {
++    t->stopped = true;
++    return 0;
++  }
++  t->done += static_cast<int64_t>(bytes);
++  return bytes;
++}
++
++size_t Header(char* data, size_t size, size_t count, void* user)
++{
++  auto* t = static_cast<Transfer*>(user);
++  const size_t bytes = size * count;
++  std::string line(data, bytes);
++  while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
++    line.pop_back();
++  if (line.compare(0, 5, "HTTP/") == 0)
++    t->headers.clear();
++  else if (!line.empty())
++    t->headers.push_back(line);
++  return bytes;
++}
++
++int ProgressCallback(void* user, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
++{
++  auto* t = static_cast<Transfer*>(user);
++  if (t->stopped)
++    return 1;
++  if (t->request->cancel && t->request->cancel->load())
++  {
++    t->stopped = true;
++    return 1;
++  }
++  if (!t->request->progress)
++    return 0;
++  const Clock::time_point now = Clock::now();
++  if (now - t->last_progress < std::chrono::milliseconds(100))
++    return 0;
++  t->last_progress = now;
++  if (!t->request->progress(t->keep ? t->done : 0, t->keep ? t->total : -1))
++  {
++    t->stopped = true;
++    return 1;
++  }
++  return 0;
++}
++
++Response Perform(const Request& request, const Sink& sink, void** session_curl,
++                 std::vector<std::pair<std::string, std::string>>* session_hosts)
++{
++  Response response;
++  auto fail = [&response](const std::string& error) {
++    response.error = error;
++    response.plain = Plain(response.status, error);
++    return response;
++  };
++  {
++    std::string error;
++    if (!Init(&error))
++      return fail(error);
++  }
++  std::string url = request.url;
++  std::string method = request.method.empty() ? (request.body.empty() ? "GET" : "POST") : Upper(request.method);
++  bool with_body = method != "GET" && method != "HEAD";
++  std::string first_host;
++  const Clock::time_point start = Clock::now();
++  for (int hop = 0;; hop++)
++  {
++    if (hop > std::max(0, request.max_redirects))
++      return fail("too many redirects");
++    std::string scheme, host;
++    int port = 0;
++    if (!SplitUrl(url, &scheme, &host, &port))
++      return fail("bad address: " + url);
++    if (hop == 0)
++      first_host = host;
++    std::string address, error;
++    if (session_hosts)
++    {
++      for (const auto& [known, known_address] : *session_hosts)
++      {
++        if (known == host)
++          address = known_address;
++      }
++    }
++    if (address.empty())
++    {
++      address = Resolve(host, &error);
++      if (address.empty())
++        return fail(error);
++      if (session_hosts)
++        session_hosts->emplace_back(host, address);
++    }
++    long timeout_ms = 0;
++    if (request.timeout_seconds > 0)
++    {
++      const long long spent = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
++      timeout_ms = static_cast<long>(request.timeout_seconds * 1000 - spent);
++      if (timeout_ms <= 0)
++        return fail("Timeout was reached (" + std::to_string(request.timeout_seconds) + " s)");
++    }
++    CURL* curl = session_curl && *session_curl ? static_cast<CURL*>(*session_curl) : curl_easy_init();
++    if (!curl)
++      return fail("curl couldn't start");
++    if (session_curl)
++    {
++      if (*session_curl)
++        curl_easy_reset(curl);
++      *session_curl = curl;
++    }
++    Transfer transfer;
++    transfer.curl = curl;
++    transfer.request = &request;
++    transfer.sink = &sink;
++    const std::string resolve = host + ":" + std::to_string(port) + ":" + address;
++    curl_slist* resolves = curl_slist_append(nullptr, resolve.c_str());
++    curl_slist* headers = nullptr;
++    bool has_type = false;
++    for (const std::string& header : request.headers)
++    {
++      const std::string name = HeaderName(header);
++      if (host != first_host && (name == "authorization" || name == "cookie"))
++        continue;
++      has_type = has_type || name == "content-type";
++      headers = curl_slist_append(headers, header.c_str());
++    }
++    if (with_body)
++    {
++      if (!has_type)
++      {
++        const std::string type =
++          "Content-Type: " +
++          (request.content_type.empty() ? std::string("application/x-www-form-urlencoded") : request.content_type);
++        headers = curl_slist_append(headers, type.c_str());
++      }
++      headers = curl_slist_append(headers, "Expect:");
++    }
++    const std::string agent = request.user_agent.empty() ? std::string("DuckStation-PS4") : request.user_agent;
++    const std::string ca = request.ca_file.empty() ? std::string("/app0/resources/cacert.pem") : request.ca_file;
++    char detail[CURL_ERROR_SIZE] = {};
++    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
++    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS));
++    curl_easy_setopt(curl, CURLOPT_RESOLVE, resolves);
++    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
++    curl_easy_setopt(curl, CURLOPT_USERAGENT, agent.c_str());
++    curl_easy_setopt(curl, CURLOPT_CAINFO, ca.c_str());
++    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
++    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
++    curl_easy_setopt(curl, CURLOPT_SSLVERSION, static_cast<long>(CURL_SSLVERSION_TLSv1_2));
++    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
++    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, std::max(1L, request.connect_seconds));
++    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout_ms);
++    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
++    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, std::max(1L, request.stall_seconds));
++    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
++    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, detail);
++    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Write);
++    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &transfer);
++    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, Header);
++    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &transfer);
++    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
++    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ProgressCallback);
++    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &transfer);
++    if (method == "GET")
++    {
++      curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
++    }
++    else if (method == "HEAD")
++    {
++      curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
++    }
++    else
++    {
++      if (method == "POST")
++        curl_easy_setopt(curl, CURLOPT_POST, 1L);
++      else
++        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
++      curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(request.body.size()));
++      curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request.body.c_str());
++    }
++    const CURLcode code = curl_easy_perform(curl);
++    long status = 0;
++    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
++    char* location = nullptr;
++    curl_easy_getinfo(curl, CURLINFO_REDIRECT_URL, &location);
++    const std::string next = location ? location : "";
++    if (code == CURLE_OK && !transfer.begun)
++      Begin(&transfer);
++    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, nullptr);
++    curl_easy_setopt(curl, CURLOPT_RESOLVE, nullptr);
++    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, nullptr);
++    curl_slist_free_all(headers);
++    curl_slist_free_all(resolves);
++    if (!session_curl)
++      curl_easy_cleanup(curl);
++    response.status = status;
++    response.url = url;
++    response.headers = std::move(transfer.headers);
++    response.redirects = hop;
++    if (transfer.keep)
++    {
++      response.bytes = transfer.done;
++      response.size = transfer.total;
++    }
++    if (transfer.stopped)
++    {
++      response.status = 0;
++      return fail("cancelled");
++    }
++    if (code != CURLE_OK)
++    {
++      std::string curl_error = std::string(curl_easy_strerror(code)) + (detail[0] ? std::string(": ") + detail : "");
++      Log_WarningPrintf("%s: %s", host.c_str(), curl_error.c_str());
++      response.status = 0;
++      return fail(curl_error);
++    }
++    if (status >= 300 && status < 400 && !next.empty())
++    {
++      std::string next_scheme, next_host;
++      int next_port = 0;
++      if (!SplitUrl(next, &next_scheme, &next_host, &next_port))
++      {
++        response.status = 0;
++        return fail("the server sent the request on to a bad address: " + next);
++      }
++      if (scheme == "https" && next_scheme != "https")
++      {
++        response.status = 0;
++        return fail("the server sent the request on to an insecure (http) address: " + next);
++      }
++      if (method != "GET" && method != "HEAD" &&
++          (status == 303 || ((status == 301 || status == 302) && method == "POST")))
++      {
++        method = "GET";
++        with_body = false;
++      }
++      url = next;
++      continue;
++    }
++    if (!response.ok())
++      response.plain = Plain(response.status, response.error);
++    return response;
++  }
++}
++
++}
++
++std::string Response::Header(const std::string& name) const
++{
++  const std::string wanted = Lower(name);
++  for (const std::string& header : headers)
++  {
++    if (HeaderName(header) != wanted)
++      continue;
++    const size_t colon = header.find(':');
++    size_t at = colon == std::string::npos ? header.size() : colon + 1;
++    while (at < header.size() && (header[at] == ' ' || header[at] == '\t'))
++      at++;
++    return header.substr(at);
++  }
++  return {};
++}
++
++std::string UrlEncode(const std::string& text)
++{
++  std::string out;
++  for (const unsigned char c : text)
++  {
++    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' ||
++        c == '.' || c == '~')
++    {
++      out += static_cast<char>(c);
++    }
++    else
++    {
++      char hex[4];
++      std::snprintf(hex, sizeof(hex), "%%%02X", c);
++      out += hex;
++    }
++  }
++  return out;
++}
++
++Session::~Session()
++{
++  if (m_curl)
++    curl_easy_cleanup(static_cast<CURL*>(m_curl));
++}
++
++Response Stream(const Request& request, const Sink& sink, Session* session)
++{
++  return Perform(request, sink, session ? &session->m_curl : nullptr, session ? &session->m_hosts : nullptr);
++}
++
++Response Fetch(const Request& request, Session* session)
++{
++  std::string body;
++  bool too_big = false;
++  const size_t most = request.max_bytes > 0 ? request.max_bytes : DEFAULT_MAX_BYTES;
++  Response response = Stream(
++    request,
++    [&](const char* data, size_t size) {
++      if (body.size() + size > most)
++      {
++        too_big = true;
++        return false;
++      }
++      body.append(data, size);
++      return true;
++    },
++    session);
++  if (too_big)
++  {
++    response.status = 0;
++    response.error = "the answer is too big (over " + std::to_string(most) + " bytes)";
++    response.plain = Plain(0, response.error);
++    body.clear();
++  }
++  response.body = std::move(body);
++  return response;
++}
++
++long GetText(const Request& request, std::string* body, size_t max_bytes, std::string* error, Session* session)
++{
++  body->clear();
++  const Response response = Stream(
++    request,
++    [&](const char* data, size_t size) {
++      body->append(data, size);
++      return body->size() <= max_bytes;
++    },
++    session);
++  *error = response.error;
++  return response.error.empty() ? response.status : 0;
++}
++
++std::string Plain(long status, const std::string& error)
++{
++  auto has = [&error](const char* text) { return error.find(text) != std::string::npos; };
++  if (!error.empty())
++  {
++    if (has("could not look up"))
++      return "no internet connection (the PS4 couldn't find the server)";
++    if (has("network is not available"))
++      return "the PS4's network isn't available";
++    if (has("cancelled"))
++      return "stopped";
++    if (has("too big"))
++      return "the server's answer is too big";
++    if (has("Timeout") || has("timed out") || has("too slow"))
++      return "the server took too long to answer";
++    if (has("BADCERT_EXPIRED") || has("BADCERT_FUTURE"))
++      return "the secure connection failed: check the PS4's date and time";
++    if (has("BADCERT") || has("peer certificate") || has("SSL certificate problem"))
++      return "the server's certificate isn't valid";
++    if (has("SSL") || has("TLS") || has("certificate") || has("mbedTLS") || has("insecure"))
++      return "the secure connection failed";
++    if (has("connect"))
++      return "the server didn't answer";
++    if (has("receiving") || has("Recv failure") || has("artial file") || has("Send failure") || has("reset") ||
++        has("was cut"))
++      return "the connection was cut";
++    return error;
++  }
++  if (status == 404 || status == 410)
++    return "not on the server";
++  if (status == 401 || status == 403 || status == 429)
++    return "the server refused it";
++  if (status >= 500)
++    return "the server had a problem: try again later";
++  if (status <= 0)
++    return "the server didn't answer";
++  return "the server answered with an error";
++}
++
++}
+diff --git a/src/util/ps4_net.h b/src/util/ps4_net.h
+new file mode 100644
+index 00000000..2b78c9f5
+--- /dev/null
++++ b/src/util/ps4_net.h
+@@ -0,0 +1,74 @@
++// SPDX-FileCopyrightText: EmuSuNi (github.com/arturofuentes1988/EmuSuNi), Dolphin Emulator Project
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <functional>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace PS4Net {
++
++using Progress = std::function<bool(int64_t done, int64_t total)>;
++
++struct Request
++{
++  std::string url;
++  std::string method;
++  std::vector<std::string> headers;
++  std::string body;
++  std::string content_type;
++  std::string user_agent;
++  std::string ca_file;
++  long timeout_seconds = 30;
++  long connect_seconds = 15;
++  long stall_seconds = 60;
++  int max_redirects = 8;
++  bool error_body = false;
++  size_t max_bytes = 0;
++  Progress progress;
++  std::atomic<bool>* cancel = nullptr;
++};
++
++struct Response
++{
++  long status = 0;
++  std::string body;
++  std::string error;
++  std::string plain;
++  std::string url;
++  std::vector<std::string> headers;
++  int64_t bytes = 0;
++  int64_t size = -1;
++  int redirects = 0;
++  bool ok() const { return status >= 200 && status < 300 && error.empty(); }
++  std::string Header(const std::string& name) const;
++};
++
++using Sink = std::function<bool(const char* data, size_t size)>;
++
++class Session
++{
++public:
++  Session() = default;
++  ~Session();
++  Session(const Session&) = delete;
++  Session& operator=(const Session&) = delete;
++
++private:
++  friend Response Stream(const Request&, const Sink&, Session*);
++  void* m_curl = nullptr;
++  std::vector<std::pair<std::string, std::string>> m_hosts;
++};
++
++Response Fetch(const Request& request, Session* session = nullptr);
++Response Stream(const Request& request, const Sink& sink, Session* session = nullptr);
++long GetText(const Request& request, std::string* body, size_t max_bytes, std::string* error,
++             Session* session = nullptr);
++std::string UrlEncode(const std::string& text);
++std::string Plain(long status, const std::string& error);
++
++}
 diff --git a/src/util/shadergen.cpp b/src/util/shadergen.cpp
 index 404f5dfa..14431936 100644
 --- a/src/util/shadergen.cpp

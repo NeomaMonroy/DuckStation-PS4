@@ -39,6 +39,8 @@ ps4_dep(JPEG::JPEG libjpeg.a)
 ps4_dep(WebP::libwebp libwebp.a libsharpyuv.a)
 ps4_dep(Freetype::Freetype inc:freetype2 libfreetype.a)
 target_link_libraries(Freetype::Freetype INTERFACE PNG::PNG ZLIB::ZLIB)
+ps4_dep(ps4::curl libcurl.a libmbedtls.a libmbedx509.a libmbedcrypto.a)
+target_link_libraries(ps4::curl INTERFACE ZLIB::ZLIB)
 ps4_dep(ps4::glslang libglslang.a libSPIRV.a libglslang-default-resource-limits.a libMachineIndependent.a libGenericCodeGen.a libOSDependent.a libglslang.a libMachineIndependent.a)
 
 set(ZLIB_FOUND TRUE)

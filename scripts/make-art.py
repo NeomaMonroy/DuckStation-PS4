@@ -58,6 +58,9 @@ else:
     centered(ImageDraw.Draw(icon), 512, 400, "DuckStation", 62, (255, 255, 255))
     icon.save(os.path.join(out, "icon0.png"))
 
+if os.path.exists(os.path.join(custom, "pic0.png")):
+    shutil.copy(os.path.join(custom, "pic0.png"), os.path.join(out, "pic0.png"))
+
 if os.path.exists(os.path.join(custom, "pic1.png")):
     shutil.copy(os.path.join(custom, "pic1.png"), os.path.join(out, "pic1.png"))
 else:

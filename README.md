@@ -20,6 +20,10 @@ packages.
 - Two DualShock 4 controllers with rumble, analog sticks and the touch pad
 - Memory cards per game, save states, and resume where you left off
 - Saved shader and pipeline caches, so games start faster after the first time
+- Box art downloaded for your whole library in one go (Settings > Interface > Download Covers)
+- RetroAchievements
+- Menu in English, Spanish (Latin America or Spain) and Brazilian Portuguese (Settings > Interface > UI Language)
+- A carousel view of your games, besides the grid and the list (the TV button at the top of the game list)
 
 ## Download
 
@@ -43,6 +47,22 @@ The first start creates `/data/DuckStation` on the PS4. Put your files there ove
 
 **Controls:** the PS4 buttons match the PS1 ones. Options = Start, touch pad click = Select. **L3 + R3** opens
 DuckStation's menu in a game (settings, save states, quit).
+
+**Covers:** with the PS4 online, open Settings > Interface > **Download Covers**. Every game without a cover gets
+its box art from libretro's thumbnails (the same pictures RetroArch uses), saved in `/data/DuckStation/covers/`. You
+can also copy your own covers there, named after the game's serial (`SCUS-94227.jpg`), file name or title.
+
+**RetroAchievements:** add these two lines under `[Cheevos]` in `/data/DuckStation/settings.ini` and start
+DuckStation:
+
+```ini
+Enabled = true
+Username = your RetroAchievements name
+Password = your password
+```
+
+It logs in once and then deletes the password from the file: only RetroAchievements' login token is kept. The PS4's
+date and time must be right for the secure connection to work.
 
 **Default settings:** recompiler, Vulkan at 3x resolution, PGXP on, VSync. Everything can be changed in the menu.
 
@@ -135,8 +155,10 @@ If a step fails, fix it and run the same command again: finished steps are skipp
 
 DuckStation is by Stenzek and its contributors. This port is based on RSDuck's Switch fork, which is GPL-3.0, so this
 port is GPL-3.0 too (see [LICENSE](LICENSE)). Mesa is MIT, glslang is BSD-3-Clause and other permissive licenses,
-and the VideoOut swapchain is adapted from Vita3K (GPL-2.0-or-later). Built with the
-[OpenOrbis](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain) toolchain from PacBrew.
+and the VideoOut swapchain is adapted from Vita3K (GPL-2.0-or-later). The cover downloader, the
+PS4 network layer and the Mbed TLS fix are adapted from [EmuSuNi](https://github.com/arturofuentes1988/EmuSuNi)
+(GPL-2.0-or-later). Built with the [OpenOrbis](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain) toolchain from
+PacBrew, with curl (curl license) and Mbed TLS (Apache-2.0).
 
 PlayStation is a trademark of Sony Interactive Entertainment. This fan project has no ties to Sony or to the
 DuckStation project. Only play games you own.

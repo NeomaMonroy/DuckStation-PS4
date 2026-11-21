@@ -100,7 +100,22 @@ build_glslang() {
     echo "  glslang: built"
 }
 
-for dep in "${@:-zlib zstd png jpeg webp freetype glslang}"; do
+build_net() {
+    if [ ! -f "$OPENORBIS/usr/lib/libcurl.a" ] || [ ! -f "$OPENORBIS/usr/lib/libmbedcrypto.a" ]; then
+        sudo pacman -S --noconfirm --needed ps4-openorbis-curl ps4-openorbis-mbedtls > /dev/null 2>&1 || true
+    fi
+    [ -f "$OPENORBIS/usr/lib/libcurl.a" ] || { echo "PacBrew's libcurl.a is missing from $OPENORBIS/usr/lib"; exit 1; }
+    "$HERE/build-mbedtls.sh" "$PSB/build/ds-mbedtls" "$PSB/src"
+    for lib in libmbedtls libmbedx509 libmbedcrypto; do
+        cp "$PSB/build/ds-mbedtls/lib/$lib.a" "$DEPS/lib/$lib.a"
+    done
+    cp "$OPENORBIS/usr/lib/libcurl.a" "$DEPS/lib/libcurl.a"
+    rm -rf "$DEPS/include/curl"
+    cp -r "$OPENORBIS/usr/include/curl" "$DEPS/include/curl"
+    echo "  curl $(grep -o 'LIBCURL_VERSION "[^"]*' "$DEPS/include/curl/curlver.h" | cut -d'"' -f2) with Mbed TLS: ready"
+}
+
+for dep in "${@:-zlib zstd png jpeg webp freetype glslang net}"; do
     for d in $dep; do "build_$d"; done
 done
 ls "$DEPS/lib"/*.a | sed 's#.*/#  #'
