@@ -52,17 +52,18 @@ DuckStation's menu in a game (settings, save states, quit).
 its box art from libretro's thumbnails (the same pictures RetroArch uses), saved in `/data/DuckStation/covers/`. You
 can also copy your own covers there, named after the game's serial (`SCUS-94227.jpg`), file name or title.
 
-**RetroAchievements:** add these two lines under `[Cheevos]` in `/data/DuckStation/settings.ini` and start
-DuckStation:
+**RetroAchievements:** turn on Settings > Achievements > **Enable Achievements**, then pick **Login**: the PS4's
+keyboard opens for your user name, then for your password. Only RetroAchievements' login token is kept, never the
+password. The PS4's date and time must be right for the secure connection to work.
+
+If the keyboard doesn't open, add these lines under `[Cheevos]` in `/data/DuckStation/settings.ini` and start
+DuckStation: it logs in once and then deletes the password from the file.
 
 ```ini
 Enabled = true
 Username = your RetroAchievements name
 Password = your password
 ```
-
-It logs in once and then deletes the password from the file: only RetroAchievements' login token is kept. The PS4's
-date and time must be right for the secure connection to work.
 
 **Default settings:** recompiler, Vulkan at 3x resolution, PGXP on, VSync. Everything can be changed in the menu.
 

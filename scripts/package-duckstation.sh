@@ -7,7 +7,7 @@ BUILD="$PSB/build/duckstation"
 SRC="${DS_SRC:-$PSB/src/duckstation-nx}"
 EBOOT="$BUILD/src/duckstation-nogui/duckstation-nogui_eboot/eboot.bin"
 ELF="$BUILD/bin/duckstation-nogui"
-VERSION="${DS_VERSION:-00.04}"
+VERSION="${DS_VERSION:-00.05}"
 
 [ -f "$EBOOT" ] || { echo "missing $EBOOT: build first" >&2; exit 1; }
 [ "$EBOOT" -nt "$ELF" ] || { echo "$EBOOT is older than the ELF: the last build failed" >&2; exit 1; }

@@ -32,6 +32,6 @@ function(ps4_duckstation_app target)
     target_link_options(${target} PRIVATE --error-limit=0 --undefined=fstatat)
     ps4_link_mesa(${target})
     target_link_libraries(${target} PRIVATE
-        SceSysmodule SceSystemService SceUserService SceVideoOut SceAudioOut ScePad SceNet)
+        SceSysmodule SceSystemService SceUserService SceVideoOut SceAudioOut ScePad SceNet SceCommonDialog SceImeDialog)
     ps4_add_eboot(${target})
 endfunction()

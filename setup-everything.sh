@@ -5,7 +5,7 @@ export PS4_BUILD_ROOT="${PS4_BUILD_ROOT:-$HOME/dk64-build}"
 export PSB="$PS4_BUILD_ROOT"
 export PS4_SYSROOT="$PS4_BUILD_ROOT/sysroot"
 export OPENORBIS="${OPENORBIS:-/opt/pacbrew/ps4/openorbis}"
-PKG_VERSION="${DS_VERSION:-00.04}"
+PKG_VERSION="${DS_VERSION:-00.05}"
 
 step() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 note() { printf '    %s\n' "$*"; }

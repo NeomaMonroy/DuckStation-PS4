@@ -2015,13 +2015,16 @@ index 96922545..e747f3ec 100644
    enable_language(ASM)
  
 diff --git a/src/duckstation-nogui/nogui_host.cpp b/src/duckstation-nogui/nogui_host.cpp
-index 5e3b0cbf..ec4dd760 100644
+index 5e3b0cbf..a91e7779 100644
 --- a/src/duckstation-nogui/nogui_host.cpp
 +++ b/src/duckstation-nogui/nogui_host.cpp
-@@ -37,7 +37,10 @@
+@@ -36,8 +36,13 @@
+ #include "common/path.h"
  #include "common/string_util.h"
  #include "common/threading.h"
++#include "common/timer.h"
  
++#include <algorithm>
 +#include <atomic>
  #include <cinttypes>
 +#include <mutex>
@@ -2029,7 +2032,7 @@ index 5e3b0cbf..ec4dd760 100644
  #include <cmath>
  #include <condition_variable>
  #include <csignal>
-@@ -46,6 +49,10 @@
+@@ -46,6 +51,10 @@
  #ifdef __SWITCH__
  #include <switch.h>
  #endif
@@ -2040,7 +2043,7 @@ index 5e3b0cbf..ec4dd760 100644
  
  Log_SetChannel(NoGUIHost);
  
-@@ -197,7 +204,9 @@ void NoGUIHost::SetAppRoot()
+@@ -197,7 +206,9 @@ void NoGUIHost::SetAppRoot()
  
  void NoGUIHost::SetResourcesDirectory()
  {
@@ -2051,7 +2054,7 @@ index 5e3b0cbf..ec4dd760 100644
    EmuFolders::Resources = "romfs:/resources";
  #else
    EmuFolders::Resources = Path::Combine(EmuFolders::AppRoot, "resources");
-@@ -210,6 +219,12 @@ void NoGUIHost::SetDataDirectory()
+@@ -210,6 +221,12 @@ void NoGUIHost::SetDataDirectory()
    if (!EmuFolders::DataRoot.empty())
      return;
  
@@ -2064,7 +2067,7 @@ index 5e3b0cbf..ec4dd760 100644
    if (ShouldUsePortableMode())
    {
      EmuFolders::DataRoot = EmuFolders::AppRoot;
-@@ -229,6 +244,10 @@ void NoGUIHost::SetDataDirectory()
+@@ -229,6 +246,10 @@ void NoGUIHost::SetDataDirectory()
      EmuFolders::DataRoot = EmuFolders::AppRoot;
  }
  
@@ -2075,7 +2078,7 @@ index 5e3b0cbf..ec4dd760 100644
  bool NoGUIHost::InitializeConfig(std::string settings_filename)
  {
    if (!SetCriticalFolders())
-@@ -260,6 +279,9 @@ bool NoGUIHost::InitializeConfig(std::string settings_filename)
+@@ -260,6 +281,9 @@ bool NoGUIHost::InitializeConfig(std::string settings_filename)
  
    EmuFolders::LoadConfig(*s_base_settings_interface.get());
    EmuFolders::EnsureFoldersExist();
@@ -2085,7 +2088,7 @@ index 5e3b0cbf..ec4dd760 100644
  
    // We need to create the console window early, otherwise it appears behind the main window.
    if (!Log::IsConsoleOutputEnabled() &&
-@@ -331,6 +353,75 @@ void Host::ReportDebuggerMessage(const std::string_view& message)
+@@ -331,6 +355,75 @@ void Host::ReportDebuggerMessage(const std::string_view& message)
    Log_ErrorPrintf("ReportDebuggerMessage: %.*s", static_cast<int>(message.size()), message.data());
  }
  
@@ -2161,7 +2164,7 @@ index 5e3b0cbf..ec4dd760 100644
  std::span<const std::pair<const char*, const char*>> Host::GetAvailableLanguageList()
  {
    return {};
-@@ -340,6 +431,7 @@ bool Host::ChangeLanguage(const char* new_language)
+@@ -340,6 +433,7 @@ bool Host::ChangeLanguage(const char* new_language)
  {
    return false;
  }
@@ -2169,7 +2172,7 @@ index 5e3b0cbf..ec4dd760 100644
  
  void Host::AddFixedInputBindings(SettingsInterface& si)
  {
-@@ -360,6 +452,27 @@ void Host::OnInputDeviceDisconnected(const std::string_view& identifier)
+@@ -360,6 +454,27 @@ void Host::OnInputDeviceDisconnected(const std::string_view& identifier)
  s32 Host::Internal::GetTranslatedStringImpl(const std::string_view& context, const std::string_view& msg, char* tbuf,
                                              size_t tbuf_space)
  {
@@ -2197,48 +2200,272 @@ index 5e3b0cbf..ec4dd760 100644
    if (msg.size() > tbuf_space)
      return -1;
    else if (msg.empty())
-@@ -793,9 +906,55 @@ void Host::OnGameChanged(const std::string& disc_path, const std::string& game_s
+@@ -793,9 +908,279 @@ void Host::OnGameChanged(const std::string& disc_path, const std::string& game_s
    NoGUIHost::UpdateWindowTitle(game_name);
  }
  
 +#ifdef __PS4__
-+static std::atomic_bool s_ps4_login_running{false};
++extern "C" {
++int sceSysmoduleLoadModule(uint16_t id);
++int sceCommonDialogInitialize(void);
++int sceImeDialogInit(const void* param, void* extended);
++int sceImeDialogGetStatus(void);
++int sceImeDialogGetResult(void* result);
++int sceImeDialogTerm(void);
++int sceUserServiceGetInitialUser(int* user_id);
++}
++
++namespace {
++
++struct PS4ImeDialogParam
++{
++  s32 user_id;
++  s32 type;
++  u64 supported_languages;
++  s32 enter_label;
++  s32 input_method;
++  void* filter;
++  u32 option;
++  u32 max_text_length;
++  char16_t* input_text_buffer;
++  float posx;
++  float posy;
++  s32 horizontal_alignment;
++  s32 vertical_alignment;
++  const char16_t* placeholder;
++  const char16_t* title;
++  s8 reserved[16];
++};
++static_assert(sizeof(PS4ImeDialogParam) == 96);
++
++struct PS4ImeDialogResult
++{
++  s32 end_status;
++  s8 reserved[12];
++};
++
++std::atomic_bool s_ps4_login_running{false};
++std::mutex s_ps4_keyboard_mutex;
++
++std::u16string PS4ToUtf16(std::string_view text)
++{
++  std::u16string out;
++  for (size_t i = 0; i < text.size();)
++  {
++    const u8 c = static_cast<u8>(text[i]);
++    u32 cp;
++    size_t len;
++    if (c < 0x80)
++    {
++      cp = c;
++      len = 1;
++    }
++    else if ((c >> 5) == 0x6 && i + 1 < text.size())
++    {
++      cp = ((c & 0x1F) << 6) | (static_cast<u8>(text[i + 1]) & 0x3F);
++      len = 2;
++    }
++    else if ((c >> 4) == 0xE && i + 2 < text.size())
++    {
++      cp = ((c & 0x0F) << 12) | ((static_cast<u8>(text[i + 1]) & 0x3F) << 6) | (static_cast<u8>(text[i + 2]) & 0x3F);
++      len = 3;
++    }
++    else if ((c >> 3) == 0x1E && i + 3 < text.size())
++    {
++      cp = ((c & 0x07) << 18) | ((static_cast<u8>(text[i + 1]) & 0x3F) << 12) |
++           ((static_cast<u8>(text[i + 2]) & 0x3F) << 6) | (static_cast<u8>(text[i + 3]) & 0x3F);
++      len = 4;
++    }
++    else
++    {
++      cp = '?';
++      len = 1;
++    }
++    if (cp >= 0x10000)
++    {
++      cp -= 0x10000;
++      out.push_back(static_cast<char16_t>(0xD800 + (cp >> 10)));
++      out.push_back(static_cast<char16_t>(0xDC00 + (cp & 0x3FF)));
++    }
++    else
++    {
++      out.push_back(static_cast<char16_t>(cp));
++    }
++    i += len;
++  }
++  return out;
++}
++
++std::string PS4ToUtf8(const char16_t* text)
++{
++  std::string out;
++  for (size_t i = 0; text[i] != 0; i++)
++  {
++    u32 cp = text[i];
++    if (cp >= 0xD800 && cp < 0xDC00 && text[i + 1] >= 0xDC00 && text[i + 1] < 0xE000)
++    {
++      cp = 0x10000 + ((cp - 0xD800) << 10) + (text[i + 1] - 0xDC00);
++      i++;
++    }
++    if (cp < 0x80)
++    {
++      out += static_cast<char>(cp);
++    }
++    else if (cp < 0x800)
++    {
++      out += static_cast<char>(0xC0 | (cp >> 6));
++      out += static_cast<char>(0x80 | (cp & 0x3F));
++    }
++    else if (cp < 0x10000)
++    {
++      out += static_cast<char>(0xE0 | (cp >> 12));
++      out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
++      out += static_cast<char>(0x80 | (cp & 0x3F));
++    }
++    else
++    {
++      out += static_cast<char>(0xF0 | (cp >> 18));
++      out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
++      out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
++      out += static_cast<char>(0x80 | (cp & 0x3F));
++    }
++  }
++  return out;
++}
++
++enum class PS4KeyboardResult
++{
++  OK,
++  Cancelled,
++  Unavailable,
++};
++
++PS4KeyboardResult PS4Keyboard(std::string_view title, std::string_view initial, bool password, std::string* text)
++{
++  std::unique_lock lock(s_ps4_keyboard_mutex);
++  static bool s_loaded = false;
++  if (!s_loaded)
++  {
++    const int module = sceSysmoduleLoadModule(0x0096);
++    const int common = sceCommonDialogInitialize();
++    Log_InfoPrintf("IME dialog module %#x, common dialog %#x", static_cast<unsigned>(module),
++                   static_cast<unsigned>(common));
++    s_loaded = true;
++  }
++
++  constexpr u32 MAX_LENGTH = 128;
++  char16_t buffer[MAX_LENGTH + 1] = {};
++  const std::u16string initial16 = PS4ToUtf16(initial);
++  std::copy_n(initial16.begin(), std::min<size_t>(initial16.size(), MAX_LENGTH), buffer);
++  const std::u16string title16 = PS4ToUtf16(title);
++
++  int user_id = -1;
++  sceUserServiceGetInitialUser(&user_id);
++
++  PS4ImeDialogParam param = {};
++  param.user_id = user_id;
++  param.type = password ? 1 : 0;
++  param.option = password ? (0x4u | 0x2u | 0x20u) : (0x2u | 0x20u);
++  param.max_text_length = MAX_LENGTH;
++  param.input_text_buffer = buffer;
++  param.posx = 960.0f;
++  param.posy = 540.0f;
++  param.horizontal_alignment = 1;
++  param.vertical_alignment = 1;
++  param.title = title16.c_str();
++
++  const int init = sceImeDialogInit(&param, nullptr);
++  if (init < 0)
++  {
++    Log_ErrorPrintf("sceImeDialogInit() failed: %#x", static_cast<unsigned>(init));
++    return PS4KeyboardResult::Unavailable;
++  }
++
++  int status;
++  while ((status = sceImeDialogGetStatus()) == 1)
++    Common::Timer::NanoSleep(50 * 1000 * 1000);
++
++  PS4ImeDialogResult result = {};
++  const int got = sceImeDialogGetResult(&result);
++  sceImeDialogTerm();
++  if (got < 0 || result.end_status != 0)
++    return PS4KeyboardResult::Cancelled;
++
++  *text = PS4ToUtf8(buffer);
++  std::fill(std::begin(buffer), std::end(buffer), u'\0');
++  return PS4KeyboardResult::OK;
++}
++
++void PS4ShowLoginHelp()
++{
++  Host::RunOnCPUThread([]() {
++    ImGuiFullscreen::OpenInfoMessageDialog(
++      "RetroAchievements",
++      "The PS4 keyboard couldn't open. To log in instead, add these lines under [Cheevos] in "
++      "/data/DuckStation/settings.ini (over FTP), then start DuckStation again:\n\nUsername = your RetroAchievements name\n"
++      "Password = your password\n\nThe password is removed from the file after the login; only a login token is kept.");
++  });
++}
++
++void PS4DoLogin(std::string username, std::string password, bool from_settings)
++{
++  Error error;
++  const bool ok = Achievements::Login(username.c_str(), password.c_str(), &error);
++  std::fill(password.begin(), password.end(), '\0');
++  if (from_settings)
++  {
++    Host::DeleteBaseSettingValue("Cheevos", "Password");
++    Host::CommitBaseSettingChanges();
++  }
++  Log_InfoPrintf("RetroAchievements login for '%s': %s", username.c_str(),
++                 ok ? "ok" : error.GetDescription().c_str());
++  if (!ok)
++  {
++    Host::RunOnCPUThread([message = error.GetDescription()]() {
++      ImGuiFullscreen::ShowToast("RetroAchievements", "Login failed: " + message, 15.0f);
++    });
++  }
++}
++
++}
 +
 +static void PS4PasswordLogin(bool user_initiated)
 +{
-+  const std::string username = Host::GetBaseStringSettingValue("Cheevos", "Username");
-+  const std::string password = Host::GetBaseStringSettingValue("Cheevos", "Password");
-+  if (username.empty() || password.empty())
-+  {
-+    if (user_initiated)
-+    {
-+      Host::RunOnCPUThread([]() {
-+        ImGuiFullscreen::OpenInfoMessageDialog(
-+          "RetroAchievements",
-+          "To log in, add these two lines under [Cheevos] in /data/DuckStation/settings.ini (over FTP), then "
-+          "start DuckStation again:\n\nUsername = your RetroAchievements name\nPassword = your password\n\n"
-+          "The password is removed from the file after the login; only a login token is kept.");
-+      });
-+    }
-+    return;
-+  }
-+
 +  bool expected = false;
 +  if (!s_ps4_login_running.compare_exchange_strong(expected, true))
 +    return;
 +
-+  std::thread([username, password]() {
-+    Error error;
-+    const bool ok = Achievements::Login(username.c_str(), password.c_str(), &error);
-+    Host::DeleteBaseSettingValue("Cheevos", "Password");
-+    Host::CommitBaseSettingChanges();
-+    Log_InfoPrintf("RetroAchievements login for '%s': %s", username.c_str(),
-+                   ok ? "ok" : error.GetDescription().c_str());
-+    if (!ok)
++  std::string username = Host::GetBaseStringSettingValue("Cheevos", "Username");
++  std::string password = Host::GetBaseStringSettingValue("Cheevos", "Password");
++  if (!username.empty() && !password.empty())
++  {
++    std::thread([username = std::move(username), password = std::move(password)]() mutable {
++      PS4DoLogin(std::move(username), std::move(password), true);
++      s_ps4_login_running.store(false);
++    }).detach();
++    return;
++  }
++
++  if (!user_initiated)
++  {
++    s_ps4_login_running.store(false);
++    return;
++  }
++
++  std::thread([username = std::move(username)]() mutable {
++    std::string typed_user, typed_password;
++    const PS4KeyboardResult user_result =
++      PS4Keyboard("RetroAchievements: user name", username, false, &typed_user);
++    if (user_result == PS4KeyboardResult::Unavailable)
++      PS4ShowLoginHelp();
++    if (user_result == PS4KeyboardResult::OK && !typed_user.empty())
 +    {
-+      Host::RunOnCPUThread([message = error.GetDescription()]() {
-+        ImGuiFullscreen::ShowToast("RetroAchievements", "Login failed: " + message, 15.0f);
-+      });
++      const PS4KeyboardResult pass_result =
++        PS4Keyboard("RetroAchievements: password", "", true, &typed_password);
++      if (pass_result == PS4KeyboardResult::Unavailable)
++        PS4ShowLoginHelp();
++      if (pass_result == PS4KeyboardResult::OK && !typed_password.empty())
++        PS4DoLogin(std::move(typed_user), std::move(typed_password), false);
 +    }
 +    s_ps4_login_running.store(false);
 +  }).detach();
@@ -2254,7 +2481,7 @@ index 5e3b0cbf..ec4dd760 100644
  }
  
  void Host::OnAchievementsLoginSuccess(const char* username, u32 points, u32 sc_points, u32 unread_messages)
-@@ -815,7 +974,9 @@ void Host::OnAchievementsHardcoreModeChanged(bool enabled)
+@@ -815,7 +1200,9 @@ void Host::OnAchievementsHardcoreModeChanged(bool enabled)
  
  void Host::OnCoverDownloaderOpenRequested()
  {
@@ -2265,7 +2492,7 @@ index 5e3b0cbf..ec4dd760 100644
  }
  
  void Host::SetMouseMode(bool relative, bool hide_cursor)
-@@ -830,7 +991,11 @@ void Host::PumpMessagesOnCPUThread()
+@@ -830,7 +1217,11 @@ void Host::PumpMessagesOnCPUThread()
  
  std::unique_ptr<NoGUIPlatform> NoGUIHost::CreatePlatform()
  {
@@ -2277,7 +2504,7 @@ index 5e3b0cbf..ec4dd760 100644
  }
  
  std::string NoGUIHost::GetWindowTitle(const std::string& game_title)
-@@ -976,7 +1141,7 @@ static void SignalHandler(int signal)
+@@ -976,7 +1367,7 @@ static void SignalHandler(int signal)
    std::signal(signal, SIG_DFL);
  
    // MacOS is missing std::quick_exit() despite it being C++11...
@@ -2286,7 +2513,7 @@ index 5e3b0cbf..ec4dd760 100644
    std::quick_exit(1);
  #else
    _Exit(1);
-@@ -1428,6 +1593,9 @@ int main(int argc, char* argv[])
+@@ -1428,6 +1819,9 @@ int main(int argc, char* argv[])
    // the rest of initialization happens on the CPU thread.
    NoGUIHost::HookSignals();
    NoGUIHost::StartCPUThread();
@@ -2296,7 +2523,7 @@ index 5e3b0cbf..ec4dd760 100644
  
    if (autoboot)
      NoGUIHost::StartSystem(std::move(autoboot.value()));
-@@ -1442,5 +1610,8 @@ int main(int argc, char* argv[])
+@@ -1442,5 +1836,8 @@ int main(int argc, char* argv[])
  
    NoGUIHost::s_base_settings_interface.reset();
    g_nogui_window.reset();
